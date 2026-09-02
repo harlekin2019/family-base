@@ -7,27 +7,27 @@ import { Badge } from '@/components/ui/badge';
 import { CalendarDays, Check, ClipboardCheck, CookingPot, FolderKanban, Link2, LoaderCircle, Pencil, Plus, ShoppingBasket, Trash2, Trophy, Users } from 'lucide-react';
 
 type Row = Record<string, string | number | boolean | null>;
-type FamilyData = { session: Row; members: Row[]; recipes: Row[]; shopping: Row[]; projects: Row[]; todos: Row[]; events: Row[]; chores: Row[] };
+export type FamilyData = { session: Row; members: Row[]; recipes: Row[]; shopping: Row[]; projects: Row[]; todos: Row[]; events: Row[]; chores: Row[] };
 const empty: FamilyData = { session: {}, members: [], recipes: [], shopping: [], projects: [], todos: [], events: [], chores: [] };
 const field = (form: FormData, key: string) => String(form.get(key) ?? '').trim();
 const unix = (value: string) => value ? Math.floor(new Date(value).getTime() / 1000) : 0;
 const dateText = (value: unknown) => value ? new Intl.DateTimeFormat('de-DE', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(Number(value) * 1000)) : 'Ohne Termin';
 
-export function WorkspaceModule({ active }: { active: string }) {
+export function WorkspaceModule({ active, onDataChange }: { active: string; onDataChange?: (data: FamilyData) => void }) {
   const [data, setData] = useState<FamilyData>(empty);
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState('');
   const [modal, setModal] = useState('');
   const refresh = async () => {
     setBusy(true); setError('');
-    try { const response = await fetch('/api/family'); const result = await response.json() as FamilyData & { error?: string }; if (!response.ok) throw new Error(result.error); setData(result); }
+    try { const response = await fetch('/api/family'); const result = await response.json() as FamilyData & { error?: string }; if (!response.ok) throw new Error(result.error); setData(result); onDataChange?.(result); }
     catch (e) { setError(e instanceof Error ? e.message : 'Daten konnten nicht geladen werden.'); }
     finally { setBusy(false); }
   };
   useEffect(() => { void refresh(); }, []);
   const act = async (payload: Record<string, unknown>) => {
     setBusy(true); setError('');
-    try { const response = await fetch('/api/family', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload) }); const result = await response.json() as FamilyData & { error?: string }; if (!response.ok) throw new Error(result.error); setData(result); setModal(''); }
+    try { const response = await fetch('/api/family', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload) }); const result = await response.json() as FamilyData & { error?: string }; if (!response.ok) throw new Error(result.error); setData(result); onDataChange?.(result); setModal(''); }
     catch (e) { setError(e instanceof Error ? e.message : 'Aktion fehlgeschlagen.'); }
     finally { setBusy(false); }
   };
