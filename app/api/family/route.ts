@@ -1,4 +1,5 @@
 import { env } from 'cloudflare:workers';
+import { extendedCatalog } from '@/lib/product-catalog';
 
 type Session = { familyId: string; memberId: string; role: string; name: string };
 const json = (data: unknown, status = 200) => Response.json(data, { status });
@@ -6,8 +7,12 @@ const id = (prefix: string) => `${prefix}_${crypto.randomUUID()}`;
 const catalogSeed = `Äpfel|Obst & Gemüse|1 kg;Bananen|Obst & Gemüse|1 kg;Orangen|Obst & Gemüse|1 kg;Zitronen|Obst & Gemüse|2 Stück;Tomaten|Obst & Gemüse|500 g;Gurke|Obst & Gemüse|1 Stück;Paprika|Obst & Gemüse|3 Stück;Karotten|Obst & Gemüse|1 kg;Kartoffeln|Obst & Gemüse|2,5 kg;Zwiebeln|Obst & Gemüse|1 kg;Knoblauch|Obst & Gemüse|1 Knolle;Salat|Obst & Gemüse|1 Kopf;Brokkoli|Obst & Gemüse|1 Stück;Champignons|Obst & Gemüse|400 g;Milch|Molkerei & Kühlung|1 l;Haferdrink|Molkerei & Kühlung|1 l;Butter|Molkerei & Kühlung|250 g;Naturjoghurt|Molkerei & Kühlung|500 g;Quark|Molkerei & Kühlung|500 g;Sahne|Molkerei & Kühlung|200 ml;Eier|Molkerei & Kühlung|10 Stück;Gouda|Molkerei & Kühlung|250 g;Mozzarella|Molkerei & Kühlung|125 g;Frischkäse|Molkerei & Kühlung|200 g;Brot|Backwaren|1 Stück;Brötchen|Backwaren|6 Stück;Toastbrot|Backwaren|1 Packung;Mehl|Backen|1 kg;Zucker|Backen|1 kg;Backpulver|Backen|1 Packung;Nudeln|Vorrat|500 g;Reis|Vorrat|1 kg;Haferflocken|Vorrat|500 g;Müsli|Vorrat|500 g;Passierte Tomaten|Vorrat|500 ml;Mais|Vorrat|1 Dose;Kidneybohnen|Vorrat|1 Dose;Kichererbsen|Vorrat|1 Dose;Olivenöl|Vorrat|500 ml;Salz|Gewürze|500 g;Pfeffer|Gewürze|1 Packung;Mineralwasser|Getränke|6 × 1,5 l;Apfelsaft|Getränke|1 l;Kaffee|Getränke|500 g;Tee|Getränke|1 Packung;Hackfleisch|Fleisch & Fisch|500 g;Hähnchenbrust|Fleisch & Fisch|500 g;Lachsfilet|Fleisch & Fisch|400 g;Tiefkühlgemüse|Tiefkühlkost|750 g;Pizza|Tiefkühlkost|1 Packung;Pommes|Tiefkühlkost|1 kg;Toilettenpapier|Haushalt|8 Rollen;Küchenrolle|Haushalt|4 Rollen;Spülmittel|Haushalt|1 Flasche;Spülmaschinentabs|Haushalt|1 Packung;Waschmittel|Haushalt|1 Packung;Müllbeutel|Haushalt|1 Rolle;Allzweckreiniger|Haushalt|1 Flasche;Zahnpasta|Drogerie|1 Tube;Duschgel|Drogerie|1 Flasche;Shampoo|Drogerie|1 Flasche;Seife|Drogerie|1 Packung;Taschentücher|Drogerie|1 Packung;Windeln|Baby|1 Packung;Katzenfutter|Tierbedarf|1 Packung;Hundefutter|Tierbedarf|1 Packung`.split(';').map((row) => row.split('|'));
 
 async function ensureCatalog() {
+  const products = [...catalogSeed, ...extendedCatalog];
   const count = await env.DB.prepare('SELECT COUNT(*) AS count FROM product_catalog').first<{ count: number }>();
-  if (!Number(count?.count)) await env.DB.batch(catalogSeed.map(([name, category, quantity], index) => env.DB.prepare('INSERT OR IGNORE INTO product_catalog (id, name, category, default_quantity) VALUES (?, ?, ?, ?)').bind(`product_${index + 1}`, name, category, quantity)));
+  if (Number(count?.count) >= products.length) return;
+  for (let offset = 0; offset < products.length; offset += 75) {
+    await env.DB.batch(products.slice(offset, offset + 75).map(([name, category, quantity], index) => env.DB.prepare('INSERT OR IGNORE INTO product_catalog (id, name, category, default_quantity) VALUES (?, ?, ?, ?)').bind(`product_${offset + index + 1}`, name, category, quantity)));
+  }
 }
 
 async function session(request: Request): Promise<Session | null> {
