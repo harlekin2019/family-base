@@ -69,6 +69,33 @@ export async function POST(request: Request) {
       if (s.role !== 'admin') return json({ error: 'Nur Administratoren dürfen Mitglieder anlegen.' }, 403);
       await db.prepare("INSERT INTO members (id, family_id, name, email, role, color, points) VALUES (?, ?, ?, ?, ?, ?, 0)").bind(id('member'), s.familyId, text('name'), text('email') || null, text('role') || 'member', text('color') || '#8cc8ff').run();
     }
+    else if (action === 'update-member') {
+      if (s.role !== 'admin') return json({ error: 'Nur Administratoren dürfen Mitglieder bearbeiten.' }, 403);
+      const target = await db.prepare('SELECT id, role FROM members WHERE id = ? AND family_id = ?').bind(text('id'), s.familyId).first<{ id: string; role: string }>();
+      if (!target) return json({ error: 'Mitglied nicht gefunden.' }, 404);
+      const role = ['admin', 'member', 'child'].includes(text('role')) ? text('role') : 'member';
+      if (target.role === 'admin' && role !== 'admin') {
+        const count = await db.prepare("SELECT COUNT(*) AS count FROM members WHERE family_id = ? AND role = 'admin'").bind(s.familyId).first<{ count: number }>();
+        if (Number(count?.count) <= 1) return json({ error: 'Der letzte Administrator kann nicht herabgestuft werden.' }, 400);
+      }
+      await db.prepare('UPDATE members SET name = ?, email = ?, role = ?, color = ? WHERE id = ? AND family_id = ?').bind(text('name'), text('email') || null, role, text('color') || '#8cc8ff', target.id, s.familyId).run();
+    }
+    else if (action === 'delete-member') {
+      if (s.role !== 'admin') return json({ error: 'Nur Administratoren dürfen Mitglieder löschen.' }, 403);
+      if (text('id') === s.memberId) return json({ error: 'Das eigene Konto kann nicht gelöscht werden.' }, 400);
+      const target = await db.prepare('SELECT id, role FROM members WHERE id = ? AND family_id = ?').bind(text('id'), s.familyId).first<{ id: string; role: string }>();
+      if (!target) return json({ error: 'Mitglied nicht gefunden.' }, 404);
+      if (target.role === 'admin') {
+        const count = await db.prepare("SELECT COUNT(*) AS count FROM members WHERE family_id = ? AND role = 'admin'").bind(s.familyId).first<{ count: number }>();
+        if (Number(count?.count) <= 1) return json({ error: 'Der letzte Administrator kann nicht gelöscht werden.' }, 400);
+      }
+      await db.batch([
+        db.prepare('UPDATE todos SET assigned_member_id = NULL WHERE assigned_member_id = ?').bind(target.id),
+        db.prepare('UPDATE events SET member_id = NULL WHERE member_id = ? AND family_id = ?').bind(target.id, s.familyId),
+        db.prepare('UPDATE chores SET assigned_member_id = NULL WHERE assigned_member_id = ? AND family_id = ?').bind(target.id, s.familyId),
+        db.prepare('DELETE FROM members WHERE id = ? AND family_id = ?').bind(target.id, s.familyId),
+      ]);
+    }
     else if (action === 'create-recipe') await db.prepare('INSERT INTO recipes (id, family_id, title, source_url, image_url, duration, servings, ingredients) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').bind(id('recipe'), s.familyId, text('title'), text('sourceUrl') || null, text('imageUrl') || null, Number(body.duration) || null, Number(body.servings) || 4, text('ingredients') || '[]').run();
     else if (action === 'recipe-to-shopping') {
       const recipe = await db.prepare('SELECT id, ingredients FROM recipes WHERE id = ? AND family_id = ?').bind(text('id'), s.familyId).first<{ id: string; ingredients: string }>();
