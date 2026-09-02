@@ -7,17 +7,17 @@ const mono = Geist_Mono({ variable: '--font-geist-mono', subsets: ['latin'] });
 
 export const metadata: Metadata = {
   metadataBase: new URL('https://familio-planer.michael217682.chatgpt.site'),
-  title: 'Familio – Gemeinsam organisiert',
+  title: 'Family Base – Gemeinsam organisiert',
   description: 'Der gemeinsame Planer für Termine, Einkäufe, Rezepte und Aufgaben.',
   openGraph: {
-    title: 'Familio – Gemeinsam organisiert',
+    title: 'Family Base – Gemeinsam organisiert',
     description: 'Der gemeinsame Planer für Termine, Einkäufe, Rezepte und Aufgaben.',
     type: 'website',
     images: ['/og.png'],
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'Familio – Gemeinsam organisiert',
+    title: 'Family Base – Gemeinsam organisiert',
     description: 'Der gemeinsame Planer für Termine, Einkäufe, Rezepte und Aufgaben.',
     images: ['/og.png'],
   },
