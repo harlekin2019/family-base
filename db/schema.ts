@@ -12,6 +12,9 @@ export const recipes = sqliteTable('recipes', {
 export const shoppingItems = sqliteTable('shopping_items', {
   id: text('id').primaryKey(), familyId: text('family_id').notNull().references(() => families.id), name: text('name').notNull(), quantity: text('quantity'), category: text('category'), checked: integer('checked', { mode: 'boolean' }).notNull().default(false), recipeId: text('recipe_id').references(() => recipes.id),
 });
+export const productCatalog = sqliteTable('product_catalog', {
+  id: text('id').primaryKey(), name: text('name').notNull(), category: text('category').notNull(), defaultQuantity: text('default_quantity'),
+}, (table) => [uniqueIndex('idx_product_catalog_name').on(table.name)]);
 export const projects = sqliteTable('projects', {
   id: text('id').primaryKey(), familyId: text('family_id').notNull().references(() => families.id), name: text('name').notNull(), icon: text('icon'),
 });

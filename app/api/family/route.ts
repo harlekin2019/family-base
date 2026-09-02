@@ -3,6 +3,12 @@ import { env } from 'cloudflare:workers';
 type Session = { familyId: string; memberId: string; role: string; name: string };
 const json = (data: unknown, status = 200) => Response.json(data, { status });
 const id = (prefix: string) => `${prefix}_${crypto.randomUUID()}`;
+const catalogSeed = `Äpfel|Obst & Gemüse|1 kg;Bananen|Obst & Gemüse|1 kg;Orangen|Obst & Gemüse|1 kg;Zitronen|Obst & Gemüse|2 Stück;Tomaten|Obst & Gemüse|500 g;Gurke|Obst & Gemüse|1 Stück;Paprika|Obst & Gemüse|3 Stück;Karotten|Obst & Gemüse|1 kg;Kartoffeln|Obst & Gemüse|2,5 kg;Zwiebeln|Obst & Gemüse|1 kg;Knoblauch|Obst & Gemüse|1 Knolle;Salat|Obst & Gemüse|1 Kopf;Brokkoli|Obst & Gemüse|1 Stück;Champignons|Obst & Gemüse|400 g;Milch|Molkerei & Kühlung|1 l;Haferdrink|Molkerei & Kühlung|1 l;Butter|Molkerei & Kühlung|250 g;Naturjoghurt|Molkerei & Kühlung|500 g;Quark|Molkerei & Kühlung|500 g;Sahne|Molkerei & Kühlung|200 ml;Eier|Molkerei & Kühlung|10 Stück;Gouda|Molkerei & Kühlung|250 g;Mozzarella|Molkerei & Kühlung|125 g;Frischkäse|Molkerei & Kühlung|200 g;Brot|Backwaren|1 Stück;Brötchen|Backwaren|6 Stück;Toastbrot|Backwaren|1 Packung;Mehl|Backen|1 kg;Zucker|Backen|1 kg;Backpulver|Backen|1 Packung;Nudeln|Vorrat|500 g;Reis|Vorrat|1 kg;Haferflocken|Vorrat|500 g;Müsli|Vorrat|500 g;Passierte Tomaten|Vorrat|500 ml;Mais|Vorrat|1 Dose;Kidneybohnen|Vorrat|1 Dose;Kichererbsen|Vorrat|1 Dose;Olivenöl|Vorrat|500 ml;Salz|Gewürze|500 g;Pfeffer|Gewürze|1 Packung;Mineralwasser|Getränke|6 × 1,5 l;Apfelsaft|Getränke|1 l;Kaffee|Getränke|500 g;Tee|Getränke|1 Packung;Hackfleisch|Fleisch & Fisch|500 g;Hähnchenbrust|Fleisch & Fisch|500 g;Lachsfilet|Fleisch & Fisch|400 g;Tiefkühlgemüse|Tiefkühlkost|750 g;Pizza|Tiefkühlkost|1 Packung;Pommes|Tiefkühlkost|1 kg;Toilettenpapier|Haushalt|8 Rollen;Küchenrolle|Haushalt|4 Rollen;Spülmittel|Haushalt|1 Flasche;Spülmaschinentabs|Haushalt|1 Packung;Waschmittel|Haushalt|1 Packung;Müllbeutel|Haushalt|1 Rolle;Allzweckreiniger|Haushalt|1 Flasche;Zahnpasta|Drogerie|1 Tube;Duschgel|Drogerie|1 Flasche;Shampoo|Drogerie|1 Flasche;Seife|Drogerie|1 Packung;Taschentücher|Drogerie|1 Packung;Windeln|Baby|1 Packung;Katzenfutter|Tierbedarf|1 Packung;Hundefutter|Tierbedarf|1 Packung`.split(';').map((row) => row.split('|'));
+
+async function ensureCatalog() {
+  const count = await env.DB.prepare('SELECT COUNT(*) AS count FROM product_catalog').first<{ count: number }>();
+  if (!Number(count?.count)) await env.DB.batch(catalogSeed.map(([name, category, quantity], index) => env.DB.prepare('INSERT OR IGNORE INTO product_catalog (id, name, category, default_quantity) VALUES (?, ?, ?, ?)').bind(`product_${index + 1}`, name, category, quantity)));
+}
 
 async function session(request: Request): Promise<Session | null> {
   const userId = request.headers.get('oai-authenticated-user-id');
@@ -25,7 +31,8 @@ async function session(request: Request): Promise<Session | null> {
 
 async function loadAll(s: Session) {
   const db = env.DB;
-  const [members, recipes, shopping, projects, todos, events, chores] = await Promise.all([
+  await ensureCatalog();
+  const [members, recipes, shopping, projects, todos, events, chores, catalog] = await Promise.all([
     db.prepare('SELECT * FROM members WHERE family_id = ? ORDER BY name').bind(s.familyId).all(),
     db.prepare('SELECT * FROM recipes WHERE family_id = ? ORDER BY title').bind(s.familyId).all(),
     db.prepare('SELECT * FROM shopping_items WHERE family_id = ? ORDER BY checked, rowid DESC').bind(s.familyId).all(),
@@ -33,8 +40,9 @@ async function loadAll(s: Session) {
     db.prepare('SELECT t.* FROM todos t JOIN projects p ON p.id=t.project_id WHERE p.family_id = ? ORDER BY t.completed, t.due_at').bind(s.familyId).all(),
     db.prepare('SELECT * FROM events WHERE family_id = ? ORDER BY starts_at').bind(s.familyId).all(),
     db.prepare('SELECT * FROM chores WHERE family_id = ? ORDER BY completed_at IS NOT NULL, due_at').bind(s.familyId).all(),
+    db.prepare('SELECT * FROM product_catalog ORDER BY category, name').all(),
   ]);
-  return { session: s, members: members.results, recipes: recipes.results, shopping: shopping.results, projects: projects.results, todos: todos.results, events: events.results, chores: chores.results };
+  return { session: s, members: members.results, recipes: recipes.results, shopping: shopping.results, projects: projects.results, todos: todos.results, events: events.results, chores: chores.results, catalog: catalog.results };
 }
 
 export async function GET(request: Request) {
