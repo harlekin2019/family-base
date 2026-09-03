@@ -9,19 +9,8 @@ import { FamilyData, WorkspaceModule } from '@/components/workspace-modules';
 import { CalendarDays, Check, ChevronRight, CircleUserRound, ClipboardCheck, CookingPot, Home, ListTodo, Menu, Plus, Search, Settings, ShoppingBasket, Sparkles, Trophy, X } from 'lucide-react';
 
 const nav = [['Übersicht', Home], ['Kalender', CalendarDays], ['Einkaufsliste', ShoppingBasket], ['Rezepte', CookingPot], ['Aufgaben', ListTodo], ['Putzplan', ClipboardCheck]] as const;
-const events = [
-  { time: '08:15', title: 'Zahnarzt Lina', who: 'Lina', color: '#8cc8ff' },
-  { time: '15:30', title: 'Fußballtraining', who: 'Finn', color: '#d7a6ff' },
-  { time: '18:30', title: 'Pizzaabend 🍕', who: 'Alle', color: '#c6f36a' },
-];
-const initialShopping = [
-  { id: 1, name: 'Hafermilch', meta: '2 Packungen · Getränke', done: false },
-  { id: 2, name: 'Tomaten', meta: '500 g · Gemüse', done: false },
-  { id: 3, name: 'Basilikum', meta: '1 Bund · Gemüse', done: true },
-];
 export function FamilyDashboard() {
   const [active, setActive] = useState('Übersicht');
-  const [shopping, setShopping] = useState(initialShopping);
   const [newItem, setNewItem] = useState('');
   const [menuOpen, setMenuOpen] = useState(false);
   const [familyData, setFamilyData] = useState<FamilyData | null>(null);
@@ -30,7 +19,6 @@ export function FamilyDashboard() {
   const currentMember = familyMembers.find((member) => member.id === familyData?.session.memberId) ?? familyMembers[0];
   const currentName = String(currentMember?.name ?? 'Familie');
   const initials = currentName.split(/\s+/).map((part) => part[0]).join('').slice(0, 2).toUpperCase();
-  const openItems = shopping.filter((item) => !item.done).length;
   const savedOpenItems = familyData?.shopping.filter((item) => !Boolean(item.checked)).length ?? 0;
   const savedRecipeCount = familyData?.recipes.length ?? 0;
   const storedChores = familyData?.chores ?? [];
@@ -41,10 +29,18 @@ export function FamilyDashboard() {
   const weeklyChores = weekStart && weekEnd ? storedChores.filter((chore) => { const due = Number(chore.due_at) * 1000; return due >= weekStart.getTime() && due < weekEnd.getTime(); }) : [];
   const weeklyProgress = weeklyChores.length ? Math.round(weeklyChores.filter((chore) => Boolean(chore.completed_at)).length / weeklyChores.length * 100) : 0;
   const todayPoints = dashboardChores.reduce((sum, chore) => sum + Number(chore.points ?? 0), 0);
+  const todayEvents = now ? (familyData?.events ?? []).filter((event) => new Date(Number(event.starts_at) * 1000).toDateString() === now.toDateString()) : [];
+  const weekDays = now ? Array.from({ length: 7 }, (_, index) => { const day = new Date(now); day.setDate(now.getDate() - ((now.getDay() + 6) % 7) + index); return day; }) : [];
+  const todayTitle = now?.toLocaleDateString('de-DE', { weekday: 'long', day: 'numeric', month: 'long' }) ?? '';
+  const rankingMonth = now?.toLocaleDateString('de-DE', { month: 'long' }).toLocaleUpperCase('de-DE') ?? '';
   const hour = now?.getHours();
   const greeting = hour === undefined ? 'Hallo' : hour >= 5 && hour < 11 ? 'Guten Morgen' : hour >= 11 && hour < 18 ? 'Guten Tag' : hour >= 18 && hour < 22 ? 'Guten Abend' : 'Gute Nacht';
   const currentDate = now?.toLocaleDateString('de-DE', { weekday: 'long', day: 'numeric', month: 'long' }).toLocaleUpperCase('de-DE') ?? '';
-  const addItem = () => { const name = newItem.trim(); if (!name) return; setShopping((items) => [...items, { id: Date.now(), name, meta: 'Manuell hinzugefügt', done: false }]); setNewItem(''); };
+  const updateFamily = async (payload: Record<string, unknown>) => {
+    const response = await fetch('/api/family', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload) });
+    if (response.ok) setFamilyData(await response.json() as FamilyData);
+  };
+  const addItem = () => { const name = newItem.trim(); if (!name) return; setNewItem(''); void updateFamily({ action: 'create-shopping', name, quantity: '', category: 'Sonstiges' }); };
 
   useEffect(() => {
     const updateClock = () => setNow(new Date());
@@ -66,11 +62,11 @@ export function FamilyDashboard() {
       description: 'Fügt einen oder mehrere Artikel zur sichtbaren Familien-Einkaufsliste hinzu.',
       inputSchema: { type: 'object', properties: { items: { type: 'array', minItems: 1, items: { type: 'string', minLength: 1 } } }, required: ['items'], additionalProperties: false },
       annotations: { readOnlyHint: false, untrustedContentHint: false },
-      execute(input: unknown) {
+      async execute(input: unknown) {
         const values = (input as { items?: unknown }).items;
         if (!Array.isArray(values) || !values.length || values.some((value) => typeof value !== 'string' || !value.trim())) throw new Error('Mindestens ein gültiger Artikel ist erforderlich.');
         const names = values.map((value) => (value as string).trim());
-        setShopping((current) => [...current, ...names.map((name, index) => ({ id: Date.now() + index, name, meta: 'Automatisch hinzugefügt', done: false }))]);
+        for (const name of names) await updateFamily({ action: 'create-shopping', name, quantity: '', category: 'Sonstiges' });
         return { added: names.length, items: names };
       },
     }, { signal: lifecycle.signal })).catch(() => undefined);
@@ -86,14 +82,14 @@ export function FamilyDashboard() {
 
     <main className="main-content"><header className="topbar"><button className="menu-button" onClick={() => setMenuOpen(true)} aria-label="Menü öffnen"><Menu /></button><div><p>{currentDate}</p><h1>{greeting}, {currentName.split(' ')[0]} <span>👋</span></h1></div><div className="top-actions"><label className="search"><Search /><input placeholder="Suchen …" aria-label="Suchen" /></label><Button className="quick-add"><Plus /> Neu hinzufügen</Button><button className="profile-mini" aria-label="Profil"><CircleUserRound /></button></div></header>
 
-      {active === 'Übersicht' ? <><section className="stats-row" aria-label="Tagesübersicht"><article><span className="stat-icon lime"><CalendarDays /></span><div><strong>3</strong><small>Termine heute</small></div><em>Alle im Blick</em></article><article><span className="stat-icon orange"><ShoppingBasket /></span><div><strong>{openItems}</strong><small>Offene Einkäufe</small></div><em>Liste teilen</em></article><article><span className="stat-icon blue"><ClipboardCheck /></span><div><strong>{dashboardChores.length}</strong><small>Putzaufgaben heute</small></div><em>+{todayPoints} Punkte</em></article><article><span className="stat-icon violet"><CookingPot /></span><div><strong>12</strong><small>Lieblingsrezepte</small></div><em>2 neu</em></article></section><div className="dashboard-grid">
-        <section className="panel calendar-panel"><div className="panel-title"><div><span>HEUTE</span><h2>Mittwoch, 2. September</h2></div><Button variant="ghost">Kalender öffnen <ChevronRight /></Button></div><div className="day-strip">{[['31','MO'],['01','DI'],['02','MI'],['03','DO'],['04','FR'],['05','SA'],['06','SO']].map(([d,w]) => <button key={d} className={d === '02' ? 'selected-day' : ''}><small>{w}</small><strong>{d}</strong>{d === '02' && <i />}</button>)}</div><div className="events">{events.map((e) => <div className="event" key={e.title}><time>{e.time}</time><i style={{ background: e.color }} /><div><strong>{e.title}</strong><small>{e.who} · {e.time} Uhr</small></div><span className="person-dot" style={{ background: e.color }}>{e.who.slice(0,1)}</span></div>)}</div></section>
+      {active === 'Übersicht' ? <><section className="stats-row" aria-label="Tagesübersicht"><article><span className="stat-icon lime"><CalendarDays /></span><div><strong>{todayEvents.length}</strong><small>Termine heute</small></div><em>{todayEvents.length ? 'Alle im Blick' : 'Keine Termine'}</em></article><article><span className="stat-icon orange"><ShoppingBasket /></span><div><strong>{savedOpenItems}</strong><small>Offene Einkäufe</small></div><em>{savedOpenItems ? 'Liste geteilt' : 'Liste leer'}</em></article><article><span className="stat-icon blue"><ClipboardCheck /></span><div><strong>{dashboardChores.length}</strong><small>Putzaufgaben heute</small></div><em>+{todayPoints} Punkte</em></article><article><span className="stat-icon violet"><CookingPot /></span><div><strong>{savedRecipeCount}</strong><small>Gespeicherte Rezepte</small></div><em>{savedRecipeCount ? 'Sammlung öffnen' : 'Noch keine Rezepte'}</em></article></section><div className="dashboard-grid">
+        <section className="panel calendar-panel"><div className="panel-title"><div><span>HEUTE</span><h2>{todayTitle}</h2></div><Button variant="ghost" onClick={() => setActive('Kalender')}>Kalender öffnen <ChevronRight /></Button></div><div className="day-strip">{weekDays.map((day) => { const selected = now?.toDateString() === day.toDateString(); return <button key={day.toISOString()} className={selected ? 'selected-day' : ''} onClick={() => setActive('Kalender')}><small>{day.toLocaleDateString('de-DE', { weekday: 'short' })}</small><strong>{day.getDate()}</strong>{selected && <i />}</button>; })}</div><div className="events">{todayEvents.length ? todayEvents.map((event) => { const member = familyMembers.find((item) => item.id === event.member_id); const who = event.is_shared ? 'Alle' : String(member?.name ?? 'Privat'); const color = String(event.is_shared ? '#c7f36c' : member?.color ?? '#8cc8ff'); const time = event.all_day ? 'Ganztägig' : new Date(Number(event.starts_at) * 1000).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }); return <div className="event" key={String(event.id)}><time>{time}</time><i style={{ background: color }} /><div><strong>{String(event.title)}</strong><small>{who}{event.all_day ? '' : ` · ${time} Uhr`}</small></div><span className="person-dot" style={{ background: color }}>{who.slice(0,1)}</span></div>; }) : <div className="dashboard-empty"><CalendarDays /><span>Heute sind keine Termine eingetragen.</span></div>}</div></section>
 
-        <section className="panel shopping-panel"><div className="panel-title"><div><span>EINKAUFSLISTE</span><h2>Noch {openItems} Dinge</h2></div><Badge className="soft-badge">Geteilt</Badge></div><div className="add-row"><Input value={newItem} onChange={(e) => setNewItem(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && addItem()} placeholder="Artikel hinzufügen …"/><Button size="icon" onClick={addItem} aria-label="Artikel hinzufügen"><Plus /></Button></div><div className="shopping-list">{shopping.slice(-4).map((item) => <button key={item.id} onClick={() => setShopping((all) => all.map((i) => i.id === item.id ? {...i, done: !i.done} : i))} className={item.done ? 'done' : ''}><span className="check">{item.done && <Check />}</span><span><strong>{item.name}</strong><small>{item.meta}</small></span></button>)}</div><Button variant="ghost" className="full-link">Zur Einkaufsliste <ChevronRight /></Button></section>
+        <section className="panel shopping-panel"><div className="panel-title"><div><span>EINKAUFSLISTE</span><h2>Noch {savedOpenItems} Dinge</h2></div><Badge className="soft-badge">Geteilt</Badge></div><div className="add-row"><Input value={newItem} onChange={(e) => setNewItem(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && addItem()} placeholder="Artikel hinzufügen …"/><Button size="icon" onClick={addItem} aria-label="Artikel hinzufügen"><Plus /></Button></div><div className="shopping-list">{(familyData?.shopping ?? []).slice(0, 4).map((item) => <button key={String(item.id)} onClick={() => void updateFamily({ action: 'toggle-shopping', id: item.id })} className={item.checked ? 'done' : ''}><span className="check">{Boolean(item.checked) && <Check />}</span><span><strong>{String(item.name)}</strong><small>{[item.quantity, item.category].filter(Boolean).join(' · ') || 'Ohne Zusatz'}</small></span></button>)}{!familyData?.shopping.length && <div className="dashboard-empty compact"><ShoppingBasket /><span>Die Einkaufsliste ist leer.</span></div>}</div><Button variant="ghost" className="full-link" onClick={() => setActive('Einkaufsliste')}>Zur Einkaufsliste <ChevronRight /></Button></section>
 
         <section className="panel chores-panel"><div className="panel-title"><div><span>PUTZPLAN</span><h2>Was heute ansteht</h2></div><button className="round-add" onClick={() => setActive('Putzplan')} aria-label="Putzaufgabe hinzufügen"><Plus /></button></div>{dashboardChores.length ? <div className="chore-list">{dashboardChores.map((chore) => { const member = familyMembers.find((item) => item.id === chore.assigned_member_id); return <div key={String(chore.id)}><span className="chore-emoji">🧽</span><div><strong>{String(chore.title)}</strong><small>{String(member?.name ?? 'Nicht zugeordnet')} · Heute</small></div><Badge className="points">+{Number(chore.points)} P</Badge></div>; })}</div> : <div className="chore-empty"><ClipboardCheck /><span>Für heute sind keine Putzaufgaben eingetragen.</span></div>}<div className="weekly-progress"><div><span>Wochenfortschritt</span><strong>{weeklyProgress}%</strong></div><Progress value={weeklyProgress} /></div></section>
 
-        <section className="panel leaderboard-panel"><div className="panel-title"><div><span>SEPTEMBER</span><h2>Punkte‑Rangliste</h2></div><Trophy className="trophy" /></div><div className="podium">{[...familyMembers].sort((a, b) => Number(b.points) - Number(a.points)).map((member, index) => <div key={String(member.id)}><span className="rank">{index + 1}</span><span className="member-avatar" style={{ background: String(member.color ?? '#8cc8ff') }}>{String(member.name).slice(0, 2).toUpperCase()}</span><span className="member-name">{String(member.name)}</span><strong>{Number(member.points)} P</strong><div className="bar"><i style={{ width: `${Math.min(100, Number(member.points))}%`, background: String(member.color ?? '#8cc8ff') }} /></div></div>)}</div><Button variant="ghost" className="full-link">Statistik ansehen <ChevronRight /></Button></section>
+        <section className="panel leaderboard-panel"><div className="panel-title"><div><span>{rankingMonth}</span><h2>Punkte‑Rangliste</h2></div><Trophy className="trophy" /></div><div className="podium">{[...familyMembers].sort((a, b) => Number(b.points) - Number(a.points)).map((member, index) => <div key={String(member.id)}><span className="rank">{index + 1}</span><span className="member-avatar" style={{ background: String(member.color ?? '#8cc8ff') }}>{String(member.name).slice(0, 2).toUpperCase()}</span><span className="member-name">{String(member.name)}</span><strong>{Number(member.points)} P</strong><div className="bar"><i style={{ width: `${Math.min(100, Number(member.points))}%`, background: String(member.color ?? '#8cc8ff') }} /></div></div>)}</div><Button variant="ghost" className="full-link" onClick={() => setActive('Putzplan')}>Statistik ansehen <ChevronRight /></Button></section>
       </div></> : <WorkspaceModule active={active} onDataChange={setFamilyData} />}
     </main>
   </div>{menuOpen && <button className="backdrop" onClick={() => setMenuOpen(false)} aria-label="Menü schließen" />}</div>;
