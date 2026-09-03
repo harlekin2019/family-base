@@ -31,12 +31,23 @@ export function FamilyDashboard() {
   const [newItem, setNewItem] = useState('');
   const [menuOpen, setMenuOpen] = useState(false);
   const [familyData, setFamilyData] = useState<FamilyData | null>(null);
+  const [now, setNow] = useState<Date | null>(null);
   const familyMembers = familyData?.members ?? [];
   const currentMember = familyMembers.find((member) => member.id === familyData?.session.memberId) ?? familyMembers[0];
   const currentName = String(currentMember?.name ?? 'Familie');
   const initials = currentName.split(/\s+/).map((part) => part[0]).join('').slice(0, 2).toUpperCase();
   const openItems = shopping.filter((item) => !item.done).length;
+  const hour = now?.getHours();
+  const greeting = hour === undefined ? 'Hallo' : hour >= 5 && hour < 11 ? 'Guten Morgen' : hour >= 11 && hour < 18 ? 'Guten Tag' : hour >= 18 && hour < 22 ? 'Guten Abend' : 'Gute Nacht';
+  const currentDate = now?.toLocaleDateString('de-DE', { weekday: 'long', day: 'numeric', month: 'long' }).toLocaleUpperCase('de-DE') ?? '';
   const addItem = () => { const name = newItem.trim(); if (!name) return; setShopping((items) => [...items, { id: Date.now(), name, meta: 'Manuell hinzugefügt', done: false }]); setNewItem(''); };
+
+  useEffect(() => {
+    const updateClock = () => setNow(new Date());
+    updateClock();
+    const timer = window.setInterval(updateClock, 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     void fetch('/api/family').then(async (response) => { if (response.ok) setFamilyData(await response.json() as FamilyData); }).catch(() => undefined);
@@ -69,7 +80,7 @@ export function FamilyDashboard() {
       <div className="sidebar-bottom"><p>FAMILIE</p><div className="member-stack">{familyMembers.map((member) => <span key={String(member.id)} style={{ background: String(member.color ?? '#8cc8ff') }} title={String(member.name)}>{String(member.name).slice(0, 2).toUpperCase()}</span>)}<button aria-label="Mitglied hinzufügen" onClick={() => setActive('Administration')}><Plus /></button></div><button className={`settings ${active === 'Administration' ? 'nav-active' : ''}`} onClick={() => { setActive('Administration'); setMenuOpen(false); }}><Settings /><span>Administration</span></button><div className="profile"><span className="avatar" style={{ background: String(currentMember?.color ?? '#ffb36b') }}>{initials}</span><span><strong>{currentName}</strong><small>{currentMember?.role === 'admin' ? 'Administrator/in' : currentMember?.role === 'child' ? 'Kind' : 'Mitglied'}</small></span><ChevronRight /></div></div>
     </aside>
 
-    <main className="main-content"><header className="topbar"><button className="menu-button" onClick={() => setMenuOpen(true)} aria-label="Menü öffnen"><Menu /></button><div><p>MITTWOCH, 2. SEPTEMBER</p><h1>Guten Morgen, {currentName.split(' ')[0]} <span>👋</span></h1></div><div className="top-actions"><label className="search"><Search /><input placeholder="Suchen …" aria-label="Suchen" /></label><Button className="quick-add"><Plus /> Neu hinzufügen</Button><button className="profile-mini" aria-label="Profil"><CircleUserRound /></button></div></header>
+    <main className="main-content"><header className="topbar"><button className="menu-button" onClick={() => setMenuOpen(true)} aria-label="Menü öffnen"><Menu /></button><div><p>{currentDate}</p><h1>{greeting}, {currentName.split(' ')[0]} <span>👋</span></h1></div><div className="top-actions"><label className="search"><Search /><input placeholder="Suchen …" aria-label="Suchen" /></label><Button className="quick-add"><Plus /> Neu hinzufügen</Button><button className="profile-mini" aria-label="Profil"><CircleUserRound /></button></div></header>
 
       {active === 'Übersicht' ? <><section className="stats-row" aria-label="Tagesübersicht"><article><span className="stat-icon lime"><CalendarDays /></span><div><strong>3</strong><small>Termine heute</small></div><em>Alle im Blick</em></article><article><span className="stat-icon orange"><ShoppingBasket /></span><div><strong>{openItems}</strong><small>Offene Einkäufe</small></div><em>Liste teilen</em></article><article><span className="stat-icon blue"><ClipboardCheck /></span><div><strong>2</strong><small>Aufgaben fällig</small></div><em>+20 Punkte</em></article><article><span className="stat-icon violet"><CookingPot /></span><div><strong>12</strong><small>Lieblingsrezepte</small></div><em>2 neu</em></article></section><div className="dashboard-grid">
         <section className="panel calendar-panel"><div className="panel-title"><div><span>HEUTE</span><h2>Mittwoch, 2. September</h2></div><Button variant="ghost">Kalender öffnen <ChevronRight /></Button></div><div className="day-strip">{[['31','MO'],['01','DI'],['02','MI'],['03','DO'],['04','FR'],['05','SA'],['06','SO']].map(([d,w]) => <button key={d} className={d === '02' ? 'selected-day' : ''}><small>{w}</small><strong>{d}</strong>{d === '02' && <i />}</button>)}</div><div className="events">{events.map((e) => <div className="event" key={e.title}><time>{e.time}</time><i style={{ background: e.color }} /><div><strong>{e.title}</strong><small>{e.who} · {e.time} Uhr</small></div><span className="person-dot" style={{ background: e.color }}>{e.who.slice(0,1)}</span></div>)}</div></section>
