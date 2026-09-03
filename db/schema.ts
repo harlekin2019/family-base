@@ -22,7 +22,7 @@ export const todos = sqliteTable('todos', {
   id: text('id').primaryKey(), projectId: text('project_id').notNull().references(() => projects.id), title: text('title').notNull(), completed: integer('completed', { mode: 'boolean' }).notNull().default(false), assignedMemberId: text('assigned_member_id').references(() => members.id), dueAt: integer('due_at', { mode: 'timestamp' }),
 });
 export const events = sqliteTable('events', {
-  id: text('id').primaryKey(), familyId: text('family_id').notNull().references(() => families.id), title: text('title').notNull(), startsAt: integer('starts_at', { mode: 'timestamp' }).notNull(), endsAt: integer('ends_at', { mode: 'timestamp' }), memberId: text('member_id').references(() => members.id), isShared: integer('is_shared', { mode: 'boolean' }).notNull().default(false),
+  id: text('id').primaryKey(), familyId: text('family_id').notNull().references(() => families.id), title: text('title').notNull(), startsAt: integer('starts_at', { mode: 'timestamp' }).notNull(), endsAt: integer('ends_at', { mode: 'timestamp' }), memberId: text('member_id').references(() => members.id), isShared: integer('is_shared', { mode: 'boolean' }).notNull().default(false), allDay: integer('all_day', { mode: 'boolean' }).notNull().default(false),
 });
 export const chores = sqliteTable('chores', {
   id: text('id').primaryKey(), familyId: text('family_id').notNull().references(() => families.id), title: text('title').notNull(), assignedMemberId: text('assigned_member_id').references(() => members.id), dueAt: integer('due_at', { mode: 'timestamp' }).notNull(), repeatRule: text('repeat_rule'), points: integer('points').notNull().default(1), completedAt: integer('completed_at', { mode: 'timestamp' }),

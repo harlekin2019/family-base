@@ -176,6 +176,7 @@ const MemberSelect = ({
 function CalendarView({ data, act, submit, modal, setModal }: ViewProps) {
   const [calendarView, setCalendarView] = useState<'day' | 'week' | 'month'>('week');
   const [cursor, setCursor] = useState(() => new Date());
+  const [allDay, setAllDay] = useState(false);
   const days = useMemo(() => {
     const selected = new Date(cursor);
     selected.setHours(0, 0, 0, 0);
@@ -255,12 +256,14 @@ function CalendarView({ data, act, submit, modal, setModal }: ViewProps) {
               .map((event) => (
                 <div className="calendar-event" key={String(event.id)}>
                   <b>
-                    {new Date(
-                      Number(event.starts_at) * 1000,
-                    ).toLocaleTimeString('de-DE', {
-                      hour: '2-digit',
-                      minute: '2-digit',
-                    })}
+                    {event.all_day
+                      ? 'Ganztägig'
+                      : new Date(
+                          Number(event.starts_at) * 1000,
+                        ).toLocaleTimeString('de-DE', {
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })}
                   </b>
                   <span>{String(event.title)}</span>
                   <small>
@@ -283,11 +286,17 @@ function CalendarView({ data, act, submit, modal, setModal }: ViewProps) {
               endsAt: unix(field(f, 'endsAt')),
               memberId: field(f, 'memberId'),
               isShared: f.get('isShared') === 'on',
+              allDay: f.get('allDay') === 'on',
             }))}
           >
             <Input name="title" placeholder="Titel" required />
-            <Input name="startsAt" type="datetime-local" required />
-            <Input name="endsAt" type="datetime-local" />
+            <label className="checkline all-day-toggle">
+              <input type="checkbox" name="allDay" checked={allDay} onChange={(event) => setAllDay(event.target.checked)} /> Ganztägiger Termin
+            </label>
+            <div className="form-row">
+              <label className="field-label"><span>{allDay ? 'Startdatum' : 'Beginn'}</span><Input name="startsAt" type={allDay ? 'date' : 'datetime-local'} required /></label>
+              <label className="field-label"><span>{allDay ? 'Enddatum' : 'Ende'}</span><Input name="endsAt" type={allDay ? 'date' : 'datetime-local'} /></label>
+            </div>
             <MemberSelect members={data.members} />
             <label className="checkline">
               <input type="checkbox" name="isShared" /> Gilt für die ganze
