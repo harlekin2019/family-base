@@ -8,6 +8,8 @@ import {
   ArrowLeft,
   CalendarDays,
   Check,
+  ChevronLeft,
+  ChevronRight,
   ClipboardCheck,
   Clock,
   CookingPot,
@@ -172,17 +174,55 @@ const MemberSelect = ({
 );
 
 function CalendarView({ data, act, submit, modal, setModal }: ViewProps) {
-  const days = useMemo(
-    () =>
-      Array.from({ length: 7 }, (_, i) => {
-        const d = new Date();
-        d.setDate(d.getDate() + i);
-        return d;
-      }),
-    [],
-  );
+  const [calendarView, setCalendarView] = useState<'day' | 'week' | 'month'>('week');
+  const [cursor, setCursor] = useState(() => new Date());
+  const days = useMemo(() => {
+    const selected = new Date(cursor);
+    selected.setHours(0, 0, 0, 0);
+    if (calendarView === 'day') return [selected];
+    if (calendarView === 'week') {
+      const monday = new Date(selected);
+      monday.setDate(selected.getDate() - ((selected.getDay() + 6) % 7));
+      return Array.from({ length: 7 }, (_, index) => {
+        const day = new Date(monday);
+        day.setDate(monday.getDate() + index);
+        return day;
+      });
+    }
+    const first = new Date(selected.getFullYear(), selected.getMonth(), 1);
+    const gridStart = new Date(first);
+    gridStart.setDate(first.getDate() - ((first.getDay() + 6) % 7));
+    return Array.from({ length: 42 }, (_, index) => {
+      const day = new Date(gridStart);
+      day.setDate(gridStart.getDate() + index);
+      return day;
+    });
+  }, [calendarView, cursor]);
+  const monthLabel = cursor.toLocaleDateString('de-DE', { month: 'long', year: 'numeric' });
+  const moveCalendar = (direction: -1 | 1) => {
+    setCursor((current) => {
+      const next = new Date(current);
+      if (calendarView === 'day') next.setDate(next.getDate() + direction);
+      if (calendarView === 'week') next.setDate(next.getDate() + direction * 7);
+      if (calendarView === 'month') next.setMonth(next.getMonth() + direction);
+      return next;
+    });
+  };
   return (
     <>
+      <div className="calendar-controls">
+        <div className="calendar-navigation">
+          <button onClick={() => moveCalendar(-1)} aria-label="Vorheriger Zeitraum"><ChevronLeft /></button>
+          <button onClick={() => setCursor(new Date())}>Heute</button>
+          <button onClick={() => moveCalendar(1)} aria-label="Nächster Zeitraum"><ChevronRight /></button>
+          <h3>{monthLabel}</h3>
+        </div>
+        <div className="calendar-view-switch" aria-label="Kalenderansicht">
+          {([['day', 'Tag'], ['week', 'Woche'], ['month', 'Monat']] as const).map(([value, label]) => (
+            <button key={value} className={calendarView === value ? 'active' : ''} onClick={() => setCalendarView(value)}>{label}</button>
+          ))}
+        </div>
+      </div>
       <div className="module-toolbar">
         <div className="filter-pills">
           <button className="active">Alle Kalender</button>
@@ -197,9 +237,9 @@ function CalendarView({ data, act, submit, modal, setModal }: ViewProps) {
           <Plus /> Termin
         </Button>
       </div>
-      <div className="week-grid">
+      <div className={`week-grid calendar-${calendarView}`}>
         {days.map((day) => (
-          <article key={day.toISOString()}>
+          <article key={day.toISOString()} className={calendarView === 'month' && day.getMonth() !== cursor.getMonth() ? 'outside-month' : ''}>
             <header>
               <span>
                 {day.toLocaleDateString('de-DE', { weekday: 'short' })}
