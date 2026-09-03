@@ -127,6 +127,15 @@ export async function POST(request: Request) {
       if (!requested.length) return json({ error: 'Bitte mindestens eine Zutat auswählen.' }, 400);
       await db.batch(requested.map((name) => db.prepare('INSERT INTO shopping_items (id, family_id, name, category, checked, recipe_id) VALUES (?, ?, ?, ?, false, ?)').bind(id('shop'), s.familyId, name, 'Aus Rezept', text('id'))));
     }
+    else if (action === 'delete-recipe') {
+      const recipeId = text('id');
+      const recipe = await db.prepare('SELECT id FROM recipes WHERE id = ? AND family_id = ?').bind(recipeId, s.familyId).first();
+      if (!recipe) return json({ error: 'Rezept nicht gefunden.' }, 404);
+      await db.batch([
+        db.prepare('UPDATE shopping_items SET recipe_id = NULL WHERE recipe_id = ? AND family_id = ?').bind(recipeId, s.familyId),
+        db.prepare('DELETE FROM recipes WHERE id = ? AND family_id = ?').bind(recipeId, s.familyId),
+      ]);
+    }
     else if (action === 'import-recipe') {
       const url = new URL(text('url'));
       if (!['http:', 'https:'].includes(url.protocol)) throw new Error('Ungültige URL');
