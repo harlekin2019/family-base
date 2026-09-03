@@ -4,6 +4,9 @@ import { extendedCatalog } from '@/lib/product-catalog';
 type Session = { familyId: string; memberId: string; role: string; name: string };
 const json = (data: unknown, status = 200) => Response.json(data, { status });
 const id = (prefix: string) => `${prefix}_${crypto.randomUUID()}`;
+const minutes = (value: unknown) => { const text = String(value ?? ''); const hours = Number(text.match(/(\d+)H/)?.[1] ?? 0); const mins = Number(text.match(/(\d+)M/)?.[1] ?? 0); return hours * 60 + mins || null; };
+const recipeImage = (value: unknown): string | null => { const first = Array.isArray(value) ? value[0] : value; if (typeof first === 'string') return first; if (first && typeof first === 'object') return String((first as Record<string, unknown>).url ?? (first as Record<string, unknown>).contentUrl ?? '') || null; return null; };
+const recipeSteps = (value: unknown): string[] => { if (!Array.isArray(value)) return []; return value.flatMap((step) => { if (typeof step === 'string') return [step]; if (!step || typeof step !== 'object') return []; const row = step as Record<string, unknown>; if (Array.isArray(row.itemListElement)) return recipeSteps(row.itemListElement); return row.text ? [String(row.text)] : []; }).filter(Boolean); };
 const catalogSeed = `Äpfel|Obst & Gemüse|1 kg;Bananen|Obst & Gemüse|1 kg;Orangen|Obst & Gemüse|1 kg;Zitronen|Obst & Gemüse|2 Stück;Tomaten|Obst & Gemüse|500 g;Gurke|Obst & Gemüse|1 Stück;Paprika|Obst & Gemüse|3 Stück;Karotten|Obst & Gemüse|1 kg;Kartoffeln|Obst & Gemüse|2,5 kg;Zwiebeln|Obst & Gemüse|1 kg;Knoblauch|Obst & Gemüse|1 Knolle;Salat|Obst & Gemüse|1 Kopf;Brokkoli|Obst & Gemüse|1 Stück;Champignons|Obst & Gemüse|400 g;Milch|Molkerei & Kühlung|1 l;Haferdrink|Molkerei & Kühlung|1 l;Butter|Molkerei & Kühlung|250 g;Naturjoghurt|Molkerei & Kühlung|500 g;Quark|Molkerei & Kühlung|500 g;Sahne|Molkerei & Kühlung|200 ml;Eier|Molkerei & Kühlung|10 Stück;Gouda|Molkerei & Kühlung|250 g;Mozzarella|Molkerei & Kühlung|125 g;Frischkäse|Molkerei & Kühlung|200 g;Brot|Backwaren|1 Stück;Brötchen|Backwaren|6 Stück;Toastbrot|Backwaren|1 Packung;Mehl|Backen|1 kg;Zucker|Backen|1 kg;Backpulver|Backen|1 Packung;Nudeln|Vorrat|500 g;Reis|Vorrat|1 kg;Haferflocken|Vorrat|500 g;Müsli|Vorrat|500 g;Passierte Tomaten|Vorrat|500 ml;Mais|Vorrat|1 Dose;Kidneybohnen|Vorrat|1 Dose;Kichererbsen|Vorrat|1 Dose;Olivenöl|Vorrat|500 ml;Salz|Gewürze|500 g;Pfeffer|Gewürze|1 Packung;Mineralwasser|Getränke|6 × 1,5 l;Apfelsaft|Getränke|1 l;Kaffee|Getränke|500 g;Tee|Getränke|1 Packung;Hackfleisch|Fleisch & Fisch|500 g;Hähnchenbrust|Fleisch & Fisch|500 g;Lachsfilet|Fleisch & Fisch|400 g;Tiefkühlgemüse|Tiefkühlkost|750 g;Pizza|Tiefkühlkost|1 Packung;Pommes|Tiefkühlkost|1 kg;Toilettenpapier|Haushalt|8 Rollen;Küchenrolle|Haushalt|4 Rollen;Spülmittel|Haushalt|1 Flasche;Spülmaschinentabs|Haushalt|1 Packung;Waschmittel|Haushalt|1 Packung;Müllbeutel|Haushalt|1 Rolle;Allzweckreiniger|Haushalt|1 Flasche;Zahnpasta|Drogerie|1 Tube;Duschgel|Drogerie|1 Flasche;Shampoo|Drogerie|1 Flasche;Seife|Drogerie|1 Packung;Taschentücher|Drogerie|1 Packung;Windeln|Baby|1 Packung;Katzenfutter|Tierbedarf|1 Packung;Hundefutter|Tierbedarf|1 Packung`.split(';').map((row) => row.split('|'));
 
 async function ensureCatalog() {
@@ -109,13 +112,20 @@ export async function POST(request: Request) {
         db.prepare('DELETE FROM members WHERE id = ? AND family_id = ?').bind(target.id, s.familyId),
       ]);
     }
-    else if (action === 'create-recipe') await db.prepare('INSERT INTO recipes (id, family_id, title, source_url, image_url, duration, servings, ingredients) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').bind(id('recipe'), s.familyId, text('title'), text('sourceUrl') || null, text('imageUrl') || null, Number(body.duration) || null, Number(body.servings) || 4, text('ingredients') || '[]').run();
+    else if (action === 'create-recipe') await db.prepare('INSERT INTO recipes (id, family_id, title, source_url, image_url, description, duration, prep_time, cook_time, servings, ingredients, instructions) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(id('recipe'), s.familyId, text('title'), text('sourceUrl') || null, text('imageUrl') || null, text('description') || null, Number(body.duration) || null, Number(body.prepTime) || null, Number(body.cookTime) || null, Number(body.servings) || 4, text('ingredients') || '[]', text('instructions') || '[]').run();
     else if (action === 'recipe-to-shopping') {
       const recipe = await db.prepare('SELECT id, ingredients FROM recipes WHERE id = ? AND family_id = ?').bind(text('id'), s.familyId).first<{ id: string; ingredients: string }>();
       if (recipe) {
         const ingredients = JSON.parse(recipe.ingredients) as string[];
         await db.batch(ingredients.map((name) => db.prepare('INSERT INTO shopping_items (id, family_id, name, category, checked, recipe_id) VALUES (?, ?, ?, ?, false, ?)').bind(id('shop'), s.familyId, name, 'Aus Rezept', recipe.id)));
       }
+    }
+    else if (action === 'ingredients-to-shopping') {
+      const recipe = await db.prepare('SELECT ingredients FROM recipes WHERE id = ? AND family_id = ?').bind(text('id'), s.familyId).first<{ ingredients: string }>();
+      const allowed = recipe ? JSON.parse(recipe.ingredients) as string[] : [];
+      const requested = Array.isArray(body.ingredients) ? body.ingredients.map(String).filter((item) => allowed.includes(item)) : [];
+      if (!requested.length) return json({ error: 'Bitte mindestens eine Zutat auswählen.' }, 400);
+      await db.batch(requested.map((name) => db.prepare('INSERT INTO shopping_items (id, family_id, name, category, checked, recipe_id) VALUES (?, ?, ?, ?, false, ?)').bind(id('shop'), s.familyId, name, 'Aus Rezept', text('id'))));
     }
     else if (action === 'import-recipe') {
       const url = new URL(text('url'));
@@ -128,8 +138,8 @@ export async function POST(request: Request) {
       const items = Array.isArray(raw) ? raw : raw['@graph'] ?? [raw];
       const recipe = items.find((item: Record<string, unknown>) => item['@type'] === 'Recipe' || (Array.isArray(item['@type']) && item['@type'].includes('Recipe')));
       if (!recipe) throw new Error('Kein Rezept auf dieser Seite gefunden.');
-      const image = Array.isArray(recipe.image) ? recipe.image[0] : typeof recipe.image === 'object' ? recipe.image?.url : recipe.image;
-      await db.prepare('INSERT INTO recipes (id, family_id, title, source_url, image_url, servings, ingredients) VALUES (?, ?, ?, ?, ?, ?, ?)').bind(id('recipe'), s.familyId, String(recipe.name ?? url.hostname), url.toString(), image ?? null, Number(String(recipe.recipeYield ?? '4').match(/\d+/)?.[0] ?? 4), JSON.stringify(recipe.recipeIngredient ?? [])).run();
+      const prepTime = minutes(recipe.prepTime); const cookTime = minutes(recipe.cookTime); const totalTime = minutes(recipe.totalTime) ?? ((prepTime ?? 0) + (cookTime ?? 0) || null);
+      await db.prepare('INSERT INTO recipes (id, family_id, title, source_url, image_url, description, duration, prep_time, cook_time, servings, ingredients, instructions) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(id('recipe'), s.familyId, String(recipe.name ?? url.hostname), url.toString(), recipeImage(recipe.image), String(recipe.description ?? '') || null, totalTime, prepTime, cookTime, Number(String(recipe.recipeYield ?? '4').match(/\d+/)?.[0] ?? 4), JSON.stringify(recipe.recipeIngredient ?? []), JSON.stringify(recipeSteps(recipe.recipeInstructions))).run();
     } else return json({ error: 'Unbekannte Aktion' }, 400);
     return json(await loadAll(s));
   } catch (error) {

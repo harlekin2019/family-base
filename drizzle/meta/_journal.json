@@ -15,6 +15,13 @@
       "when": 1788383000000,
       "tag": "0001_product_catalog",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1788470000000,
+      "tag": "0002_recipe_details",
+      "breakpoints": true
     }
   ]
 }
