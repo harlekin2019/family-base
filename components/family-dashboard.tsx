@@ -37,6 +37,7 @@ export function FamilyDashboard() {
   const currentName = String(currentMember?.name ?? 'Familie');
   const initials = currentName.split(/\s+/).map((part) => part[0]).join('').slice(0, 2).toUpperCase();
   const openItems = shopping.filter((item) => !item.done).length;
+  const savedOpenItems = familyData?.shopping.filter((item) => !Boolean(item.checked)).length ?? 0;
   const hour = now?.getHours();
   const greeting = hour === undefined ? 'Hallo' : hour >= 5 && hour < 11 ? 'Guten Morgen' : hour >= 11 && hour < 18 ? 'Guten Tag' : hour >= 18 && hour < 22 ? 'Guten Abend' : 'Gute Nacht';
   const currentDate = now?.toLocaleDateString('de-DE', { weekday: 'long', day: 'numeric', month: 'long' }).toLocaleUpperCase('de-DE') ?? '';
@@ -76,7 +77,7 @@ export function FamilyDashboard() {
   return <div className="min-h-screen bg-background text-foreground"><div className="app-shell">
     <aside className={`sidebar ${menuOpen ? 'sidebar-open' : ''}`}>
       <div className="brand"><div className="brand-mark"><Home size={19} /></div><span>Family Base</span><button className="mobile-close" onClick={() => setMenuOpen(false)} aria-label="Menü schließen"><X /></button></div>
-      <nav className="nav-list" aria-label="Hauptnavigation">{nav.map(([label, Icon]) => <button key={label} className={active === label ? 'nav-active' : ''} onClick={() => { setActive(label); setMenuOpen(false); }}><Icon /><span>{label}</span>{label === 'Einkaufsliste' && <em>{openItems}</em>}</button>)}</nav>
+      <nav className="nav-list" aria-label="Hauptnavigation">{nav.map(([label, Icon]) => <button key={label} className={active === label ? 'nav-active' : ''} onClick={() => { setActive(label); setMenuOpen(false); }}><Icon /><span>{label}</span>{label === 'Einkaufsliste' && savedOpenItems > 0 && <em>{savedOpenItems}</em>}</button>)}</nav>
       <div className="sidebar-bottom"><p>FAMILIE</p><div className="member-stack">{familyMembers.map((member) => <span key={String(member.id)} style={{ background: String(member.color ?? '#8cc8ff') }} title={String(member.name)}>{String(member.name).slice(0, 2).toUpperCase()}</span>)}<button aria-label="Mitglied hinzufügen" onClick={() => setActive('Administration')}><Plus /></button></div><button className={`settings ${active === 'Administration' ? 'nav-active' : ''}`} onClick={() => { setActive('Administration'); setMenuOpen(false); }}><Settings /><span>Administration</span></button><div className="profile"><span className="avatar" style={{ background: String(currentMember?.color ?? '#ffb36b') }}>{initials}</span><span><strong>{currentName}</strong><small>{currentMember?.role === 'admin' ? 'Administrator/in' : currentMember?.role === 'child' ? 'Kind' : 'Mitglied'}</small></span><ChevronRight /></div></div>
     </aside>
 
