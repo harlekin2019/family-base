@@ -59,6 +59,24 @@ const dateText = (value: unknown) =>
       }).format(new Date(Number(value) * 1000))
     : 'Ohne Termin';
 
+const cleaningCatalog = [
+  { room: 'Küche', tasks: ['Arbeitsflächen abwischen', 'Spüle und Armaturen reinigen', 'Herd und Kochfeld reinigen', 'Backofen reinigen', 'Mikrowelle reinigen', 'Kühlschrank auswischen', 'Geschirrspüler reinigen', 'Schränke außen abwischen', 'Dunstabzugshaube reinigen', 'Mülleimer leeren und auswischen', 'Boden saugen', 'Boden wischen'] },
+  { room: 'Badezimmer', tasks: ['Waschbecken reinigen', 'Toilette reinigen', 'Dusche reinigen', 'Badewanne reinigen', 'Armaturen entkalken', 'Spiegel putzen', 'Fliesen abwischen', 'Abfluss reinigen', 'Handtücher wechseln', 'Badvorleger wechseln', 'Mülleimer leeren', 'Boden saugen', 'Boden wischen'] },
+  { room: 'Gäste-WC', tasks: ['Waschbecken reinigen', 'Toilette reinigen', 'Armaturen entkalken', 'Spiegel putzen', 'Handtücher wechseln', 'Seife auffüllen', 'Mülleimer leeren', 'Boden wischen'] },
+  { room: 'Wohnzimmer', tasks: ['Staub wischen', 'Möbel abwischen', 'Sofa absaugen', 'Kissen und Decken ordnen', 'Regale reinigen', 'Fernseher entstauben', 'Pflanzen pflegen', 'Boden saugen', 'Boden wischen', 'Fenster putzen'] },
+  { room: 'Schlafzimmer', tasks: ['Bett machen', 'Bettwäsche wechseln', 'Matratze absaugen', 'Nachttische abwischen', 'Schränke abstauben', 'Kleidung wegräumen', 'Boden saugen', 'Boden wischen', 'Fenster putzen'] },
+  { room: 'Kinderzimmer', tasks: ['Spielzeug aufräumen', 'Schreibtisch aufräumen', 'Oberflächen abwischen', 'Regale entstauben', 'Bettwäsche wechseln', 'Kleidung wegräumen', 'Boden saugen', 'Boden wischen', 'Fenster putzen'] },
+  { room: 'Arbeitszimmer', tasks: ['Schreibtisch aufräumen', 'Schreibtisch abwischen', 'Bildschirme reinigen', 'Tastatur reinigen', 'Regale entstauben', 'Papierkorb leeren', 'Boden saugen', 'Boden wischen'] },
+  { room: 'Flur & Treppenhaus', tasks: ['Garderobe aufräumen', 'Schuhe ordnen', 'Geländer abwischen', 'Lichtschalter reinigen', 'Fußmatte ausschütteln', 'Boden saugen', 'Boden wischen', 'Treppe reinigen'] },
+  { room: 'Esszimmer', tasks: ['Esstisch abwischen', 'Stühle reinigen', 'Oberflächen entstauben', 'Boden saugen', 'Boden wischen', 'Fenster putzen'] },
+  { room: 'Hauswirtschaftsraum', tasks: ['Wäsche sortieren', 'Waschmaschine reinigen', 'Trockner reinigen', 'Flusensieb säubern', 'Regale aufräumen', 'Vorräte prüfen', 'Boden saugen', 'Boden wischen'] },
+  { room: 'Keller', tasks: ['Aufräumen', 'Regale entstauben', 'Spinnweben entfernen', 'Vorräte prüfen', 'Boden fegen', 'Boden wischen', 'Fenster putzen'] },
+  { room: 'Garage', tasks: ['Aufräumen', 'Werkzeug sortieren', 'Regale abwischen', 'Müll entsorgen', 'Boden fegen', 'Garagentor reinigen'] },
+  { room: 'Balkon & Terrasse', tasks: ['Möbel abwischen', 'Geländer reinigen', 'Pflanzen pflegen', 'Laub entfernen', 'Boden fegen', 'Boden wischen', 'Grill reinigen'] },
+  { room: 'Garten', tasks: ['Rasen mähen', 'Beete jäten', 'Pflanzen gießen', 'Hecke schneiden', 'Laub harken', 'Gartenmöbel reinigen', 'Müll einsammeln'] },
+  { room: 'Gesamtes Zuhause', tasks: ['Alle Räume lüften', 'Staub wischen', 'Türgriffe reinigen', 'Lichtschalter reinigen', 'Heizkörper entstauben', 'Sockelleisten reinigen', 'Spinnweben entfernen', 'Fenster putzen', 'Staubsaugen', 'Böden wischen', 'Mülleimer leeren', 'Putzmittel auffüllen'] },
+] as const;
+
 export function WorkspaceModule({
   active,
   onDataChange,
@@ -740,6 +758,10 @@ function TodoView({ data, act, submit, modal, setModal }: ViewProps) {
 }
 
 function ChoreView({ data, act, submit, modal, setModal }: ViewProps) {
+  const [selectedRoom, setSelectedRoom] = useState('');
+  const [selectedTask, setSelectedTask] = useState('');
+  const selectedRoomEntry = cleaningCatalog.find((entry) => entry.room === selectedRoom);
+  const suggestedTitle = selectedRoom && selectedTask ? `${selectedRoom} – ${selectedTask}` : '';
   return (
     <>
       <div className="module-toolbar">
@@ -816,7 +838,44 @@ function ChoreView({ data, act, submit, modal, setModal }: ViewProps) {
               points: Number(field(f, 'points')),
             }))}
           >
-            <Input name="title" placeholder="Aufgabe" required />
+            <div className="cleaning-catalog-picker">
+              <label htmlFor="chore-room">Raum auswählen</label>
+              <select
+                id="chore-room"
+                className="control"
+                value={selectedRoom}
+                onChange={(event) => {
+                  setSelectedRoom(event.target.value);
+                  setSelectedTask('');
+                }}
+              >
+                <option value="">Raum auswählen …</option>
+                {cleaningCatalog.map((entry) => (
+                  <option key={entry.room} value={entry.room}>{entry.room}</option>
+                ))}
+              </select>
+              <label htmlFor="chore-template">Tätigkeit auswählen</label>
+              <select
+                id="chore-template"
+                className="control"
+                value={selectedTask}
+                disabled={!selectedRoomEntry}
+                onChange={(event) => setSelectedTask(event.target.value)}
+              >
+                <option value="">Tätigkeit auswählen …</option>
+                {selectedRoomEntry?.tasks.map((task) => (
+                  <option key={task} value={task}>{task}</option>
+                ))}
+              </select>
+              <small>Oder darunter eine eigene Aufgabe eingeben.</small>
+            </div>
+            <Input
+              key={suggestedTitle}
+              name="title"
+              placeholder="Aufgabe"
+              defaultValue={suggestedTitle}
+              required
+            />
             <MemberSelect members={data.members} />
             <Input name="dueAt" type="datetime-local" required />
             <select name="repeatRule" className="control">
