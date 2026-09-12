@@ -4,6 +4,33 @@ import { extendedCatalog } from '@/lib/product-catalog';
 type Session = { familyId: string; memberId: string; role: string; name: string };
 const json = (data: unknown, status = 200) => Response.json(data, { status });
 const id = (prefix: string) => `${prefix}_${crypto.randomUUID()}`;
+type ChoreRule = { frequency: 'weekly' | 'biweekly' | 'monthly'; weekdays: number[]; rotationMemberIds: string[] };
+const choreRule = (value: unknown): ChoreRule | null => {
+  if (!value) return null;
+  if (value === 'weekly' || value === 'monthly') return { frequency: value, weekdays: [], rotationMemberIds: [] };
+  try {
+    const parsed = JSON.parse(String(value)) as Partial<ChoreRule>;
+    if (!['weekly', 'biweekly', 'monthly'].includes(String(parsed.frequency))) return null;
+    return {
+      frequency: parsed.frequency as ChoreRule['frequency'],
+      weekdays: Array.isArray(parsed.weekdays) ? parsed.weekdays.map(Number).filter((day) => day >= 1 && day <= 7) : [],
+      rotationMemberIds: Array.isArray(parsed.rotationMemberIds) ? parsed.rotationMemberIds.map(String).filter(Boolean) : [],
+    };
+  } catch { return null; }
+};
+const nextChoreDue = (dueAt: number, rule: ChoreRule) => {
+  const due = new Date(dueAt * 1000);
+  if (rule.frequency === 'monthly') {
+    due.setUTCMonth(due.getUTCMonth() + 1);
+    return Math.floor(due.getTime() / 1000);
+  }
+  const weekdays = rule.weekdays.length ? [...new Set(rule.weekdays)].sort((a, b) => a - b) : [((due.getUTCDay() + 6) % 7) + 1];
+  const currentDay = ((due.getUTCDay() + 6) % 7) + 1;
+  const nextDay = weekdays.find((day) => day > currentDay);
+  const days = nextDay ? nextDay - currentDay : (rule.frequency === 'biweekly' ? 14 : 7) - currentDay + weekdays[0];
+  due.setUTCDate(due.getUTCDate() + days);
+  return Math.floor(due.getTime() / 1000);
+};
 const minutes = (value: unknown) => { const text = String(value ?? ''); const hours = Number(text.match(/(\d+)H/)?.[1] ?? 0); const mins = Number(text.match(/(\d+)M/)?.[1] ?? 0); return hours * 60 + mins || null; };
 const recipeImage = (value: unknown, pageUrl: URL, html: string): string | null => {
   const candidates: string[] = [];
@@ -82,13 +109,29 @@ export async function POST(request: Request) {
     else if (action === 'create-todo') await db.prepare('INSERT INTO todos (id, project_id, title, completed, assigned_member_id, due_at) SELECT ?, p.id, ?, false, ?, ? FROM projects p WHERE p.id = ? AND p.family_id = ?').bind(id('todo'), text('title'), text('memberId') || null, Number(body.dueAt) || null, text('projectId'), s.familyId).run();
     else if (action === 'toggle-todo') await db.prepare('UPDATE todos SET completed = NOT completed WHERE id = ? AND project_id IN (SELECT id FROM projects WHERE family_id = ?)').bind(text('id'), s.familyId).run();
     else if (action === 'create-event') await db.prepare('INSERT INTO events (id, family_id, title, starts_at, ends_at, member_id, is_shared, all_day) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').bind(id('event'), s.familyId, text('title'), Number(body.startsAt), Number(body.endsAt) || null, text('memberId') || null, body.isShared ? 1 : 0, body.allDay ? 1 : 0).run();
-    else if (action === 'create-chore') await db.prepare('INSERT INTO chores (id, family_id, title, assigned_member_id, due_at, repeat_rule, points) VALUES (?, ?, ?, ?, ?, ?, ?)').bind(id('chore'), s.familyId, text('title'), text('memberId') || null, Number(body.dueAt), text('repeatRule') || null, Number(body.points) || 1).run();
+    else if (action === 'create-chore') {
+      const frequency = ['weekly', 'biweekly', 'monthly'].includes(text('repeatRule')) ? text('repeatRule') as ChoreRule['frequency'] : null;
+      const weekdays = Array.isArray(body.weekdays) ? body.weekdays.map(Number).filter((day) => day >= 1 && day <= 7) : [];
+      const allowedMembers = new Set((await db.prepare('SELECT id FROM members WHERE family_id = ?').bind(s.familyId).all<{ id: string }>()).results.map((member) => member.id));
+      const rotationMemberIds = Array.isArray(body.rotationMemberIds) ? body.rotationMemberIds.map(String).filter((memberId) => allowedMembers.has(memberId)) : [];
+      const assignedMemberId = rotationMemberIds[0] ?? (allowedMembers.has(text('memberId')) ? text('memberId') : null);
+      const rule = frequency ? JSON.stringify({ frequency, weekdays, rotationMemberIds }) : null;
+      await db.prepare('INSERT INTO chores (id, family_id, title, assigned_member_id, due_at, repeat_rule, points) VALUES (?, ?, ?, ?, ?, ?, ?)').bind(id('chore'), s.familyId, text('title'), assignedMemberId, Number(body.dueAt), rule, Number(body.points) || 1).run();
+    }
     else if (action === 'complete-chore') {
-      const chore = await db.prepare('SELECT assigned_member_id, points FROM chores WHERE id = ? AND family_id = ? AND completed_at IS NULL').bind(text('id'), s.familyId).first<{ assigned_member_id: string | null; points: number }>();
-      if (chore) await db.batch([
-        db.prepare('UPDATE chores SET completed_at = ? WHERE id = ? AND family_id = ?').bind(Math.floor(Date.now() / 1000), text('id'), s.familyId),
-        db.prepare('UPDATE members SET points = points + ? WHERE id = ? AND family_id = ?').bind(chore.points, chore.assigned_member_id, s.familyId),
-      ]);
+      const chore = await db.prepare('SELECT assigned_member_id, points, due_at, repeat_rule FROM chores WHERE id = ? AND family_id = ? AND completed_at IS NULL').bind(text('id'), s.familyId).first<{ assigned_member_id: string | null; points: number; due_at: number; repeat_rule: string | null }>();
+      if (chore) {
+        const rule = choreRule(chore.repeat_rule);
+        const rotation = rule?.rotationMemberIds ?? [];
+        const currentIndex = rotation.indexOf(chore.assigned_member_id ?? '');
+        const nextMemberId = rotation.length ? rotation[(currentIndex + 1 + rotation.length) % rotation.length] : chore.assigned_member_id;
+        await db.batch([
+          rule
+            ? db.prepare('UPDATE chores SET due_at = ?, assigned_member_id = ?, completed_at = NULL WHERE id = ? AND family_id = ?').bind(nextChoreDue(chore.due_at, rule), nextMemberId, text('id'), s.familyId)
+            : db.prepare('UPDATE chores SET completed_at = ? WHERE id = ? AND family_id = ?').bind(Math.floor(Date.now() / 1000), text('id'), s.familyId),
+          db.prepare('UPDATE members SET points = points + ? WHERE id = ? AND family_id = ?').bind(chore.points, chore.assigned_member_id, s.familyId),
+        ]);
+      }
     }
     else if (action === 'create-member') {
       if (s.role !== 'admin') return json({ error: 'Nur Administratoren dürfen Mitglieder anlegen.' }, 403);

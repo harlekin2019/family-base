@@ -58,6 +58,18 @@ const dateText = (value: unknown) =>
         timeStyle: 'short',
       }).format(new Date(Number(value) * 1000))
     : 'Ohne Termin';
+const repeatText = (value: unknown) => {
+  if (!value) return '';
+  if (value === 'weekly') return ' · wöchentlich';
+  if (value === 'monthly') return ' · monatlich';
+  try {
+    const rule = JSON.parse(String(value)) as { frequency?: string; weekdays?: number[]; rotationMemberIds?: string[] };
+    const frequency = rule.frequency === 'biweekly' ? 'alle 2 Wochen' : rule.frequency === 'monthly' ? 'monatlich' : 'wöchentlich';
+    const labels = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'];
+    const days = rule.weekdays?.map((day) => labels[day - 1]).filter(Boolean).join(', ');
+    return ` · ${frequency}${days ? ` (${days})` : ''}${(rule.rotationMemberIds?.length ?? 0) > 1 ? ' · wechselnd' : ''}`;
+  } catch { return ''; }
+};
 
 const cleaningCatalog = [
   { room: 'Küche', tasks: ['Spülmaschine einräumen', 'Spülmaschine ausräumen', 'Spülmaschine starten', 'Geschirr von Hand spülen', 'Geschirr abtrocknen', 'Geschirr in Schränke einräumen', 'Arbeitsflächen abwischen', 'Spüle und Armaturen reinigen', 'Herd und Kochfeld reinigen', 'Backofen reinigen', 'Mikrowelle reinigen', 'Kühlschrank einräumen', 'Kühlschrank auswischen', 'Vorräte in Schränke einräumen', 'Einkäufe einräumen', 'Geschirrspüler reinigen', 'Schränke außen abwischen', 'Dunstabzugshaube reinigen', 'Mülleimer leeren und auswischen', 'Boden saugen', 'Boden wischen'] },
@@ -760,6 +772,8 @@ function TodoView({ data, act, submit, modal, setModal }: ViewProps) {
 function ChoreView({ data, act, submit, modal, setModal }: ViewProps) {
   const [selectedRoom, setSelectedRoom] = useState('');
   const [selectedTask, setSelectedTask] = useState('');
+  const [repeatRule, setRepeatRule] = useState('');
+  const [rotateMembers, setRotateMembers] = useState(false);
   const selectedRoomEntry = cleaningCatalog.find((entry) => entry.room === selectedRoom);
   const suggestedTitle = selectedRoom && selectedTask ? `${selectedRoom} – ${selectedTask}` : '';
   return (
@@ -789,7 +803,7 @@ function ChoreView({ data, act, submit, modal, setModal }: ViewProps) {
                     {(data.members.find(
                       (m) => m.id === chore.assigned_member_id,
                     )?.name as string) ?? 'Nicht zugeordnet'}{' '}
-                    · {dateText(chore.due_at)}
+                    · {dateText(chore.due_at)}{repeatText(chore.repeat_rule)}
                   </small>
                 </div>
                 <Badge>+{Number(chore.points)} P</Badge>
@@ -835,6 +849,8 @@ function ChoreView({ data, act, submit, modal, setModal }: ViewProps) {
               memberId: field(f, 'memberId'),
               dueAt: unix(field(f, 'dueAt')),
               repeatRule: field(f, 'repeatRule'),
+              weekdays: f.getAll('weekdays').map(String),
+              rotationMemberIds: f.getAll('rotationMemberIds').map(String),
               points: Number(field(f, 'points')),
             }))}
           >
@@ -876,13 +892,43 @@ function ChoreView({ data, act, submit, modal, setModal }: ViewProps) {
               defaultValue={suggestedTitle}
               required
             />
-            <MemberSelect members={data.members} />
+            <label className="checkline rotation-toggle">
+              <input
+                type="checkbox"
+                checked={rotateMembers}
+                onChange={(event) => setRotateMembers(event.target.checked)}
+              />
+              Familienmitglieder abwechselnd zuordnen
+            </label>
+            {rotateMembers ? (
+              <fieldset className="member-rotation-picker">
+                <legend>Mitglieder in gewünschter Reihenfolge auswählen</legend>
+                {data.members.map((member) => (
+                  <label key={String(member.id)}>
+                    <input type="checkbox" name="rotationMemberIds" value={String(member.id)} />
+                    <span className="member-avatar" style={{ background: String(member.color) }}>{String(member.name).slice(0, 2).toUpperCase()}</span>
+                    {String(member.name)}
+                  </label>
+                ))}
+                <small>Nach jeder Erledigung wechselt die Aufgabe zum nächsten ausgewählten Mitglied.</small>
+              </fieldset>
+            ) : <MemberSelect members={data.members} />}
             <Input name="dueAt" type="datetime-local" required />
-            <select name="repeatRule" className="control">
+            <select name="repeatRule" className="control" value={repeatRule} onChange={(event) => setRepeatRule(event.target.value)}>
               <option value="">Einmalig</option>
               <option value="weekly">Wöchentlich</option>
+              <option value="biweekly">Alle zwei Wochen</option>
               <option value="monthly">Monatlich</option>
             </select>
+            {(repeatRule === 'weekly' || repeatRule === 'biweekly') && (
+              <fieldset className="weekday-picker">
+                <legend>Gewünschte Wochentage</legend>
+                {[['1', 'Mo'], ['2', 'Di'], ['3', 'Mi'], ['4', 'Do'], ['5', 'Fr'], ['6', 'Sa'], ['7', 'So']].map(([value, label]) => (
+                  <label key={value}><input type="checkbox" name="weekdays" value={value} /><span>{label}</span></label>
+                ))}
+                <small>Ohne Auswahl wird der Wochentag des ersten Termins verwendet.</small>
+              </fieldset>
+            )}
             <Input name="points" type="number" min="1" defaultValue="10" />
             <Button type="submit">Aufgabe speichern</Button>
           </form>
