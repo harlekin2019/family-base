@@ -885,13 +885,16 @@ function ChoreView({ data, act, submit, modal, setModal }: ViewProps) {
               </select>
               <small>Oder darunter eine eigene Aufgabe eingeben.</small>
             </div>
-            <Input
-              key={suggestedTitle}
-              name="title"
-              placeholder="Aufgabe"
-              defaultValue={suggestedTitle}
-              required
-            />
+            <label className="field-label">
+              <span>Aufgabe</span>
+              <Input
+                key={suggestedTitle}
+                name="title"
+                placeholder="Aufgabe beschreiben"
+                defaultValue={suggestedTitle}
+                required
+              />
+            </label>
             <label className="checkline rotation-toggle">
               <input
                 type="checkbox"
@@ -912,14 +915,20 @@ function ChoreView({ data, act, submit, modal, setModal }: ViewProps) {
                 ))}
                 <small>Nach jeder Erledigung wechselt die Aufgabe zum nächsten ausgewählten Mitglied.</small>
               </fieldset>
-            ) : <MemberSelect members={data.members} />}
-            <Input name="dueAt" type="datetime-local" required />
-            <select name="repeatRule" className="control" value={repeatRule} onChange={(event) => setRepeatRule(event.target.value)}>
-              <option value="">Einmalig</option>
-              <option value="weekly">Wöchentlich</option>
-              <option value="biweekly">Alle zwei Wochen</option>
-              <option value="monthly">Monatlich</option>
-            </select>
+            ) : <label className="field-label"><span>Zuständiges Mitglied</span><MemberSelect members={data.members} /></label>}
+            <label className="field-label">
+              <span>Erster Termin</span>
+              <Input name="dueAt" type="datetime-local" required />
+            </label>
+            <label className="field-label">
+              <span>Wiederholung</span>
+              <select name="repeatRule" className="control" value={repeatRule} onChange={(event) => setRepeatRule(event.target.value)}>
+                <option value="">Einmalig</option>
+                <option value="weekly">Wöchentlich</option>
+                <option value="biweekly">Alle zwei Wochen</option>
+                <option value="monthly">Monatlich</option>
+              </select>
+            </label>
             {(repeatRule === 'weekly' || repeatRule === 'biweekly') && (
               <fieldset className="weekday-picker">
                 <legend>Gewünschte Wochentage</legend>
@@ -929,7 +938,10 @@ function ChoreView({ data, act, submit, modal, setModal }: ViewProps) {
                 <small>Ohne Auswahl wird der Wochentag des ersten Termins verwendet.</small>
               </fieldset>
             )}
-            <Input name="points" type="number" min="1" defaultValue="10" />
+            <label className="field-label">
+              <span>Punkte bei Erledigung</span>
+              <Input name="points" type="number" min="1" defaultValue="10" />
+            </label>
             <Button type="submit">Aufgabe speichern</Button>
           </form>
         </Modal>
