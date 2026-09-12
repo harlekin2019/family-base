@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Progress } from '@/components/ui/progress';
 import { FamilyData, WorkspaceModule } from '@/components/workspace-modules';
-import { CalendarDays, Check, ChevronRight, CircleUserRound, ClipboardCheck, CookingPot, Home, ListTodo, Menu, Plus, Search, Settings, ShoppingBasket, Sparkles, Trophy, X } from 'lucide-react';
+import { Bell, BellRing, CalendarDays, Check, ChevronRight, CircleUserRound, ClipboardCheck, CookingPot, Home, ListTodo, Mail, Menu, Plus, Search, Settings, ShoppingBasket, Sparkles, Trophy, X } from 'lucide-react';
 
 const nav = [['Übersicht', Home], ['Kalender', CalendarDays], ['Einkaufsliste', ShoppingBasket], ['Rezepte', CookingPot], ['Aufgaben', ListTodo], ['Putzplan', ClipboardCheck]] as const;
 export function FamilyDashboard() {
@@ -15,6 +15,8 @@ export function FamilyDashboard() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [familyData, setFamilyData] = useState<FamilyData | null>(null);
   const [now, setNow] = useState<Date | null>(null);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [browserPermission, setBrowserPermission] = useState<NotificationPermission>('default');
   const familyMembers = familyData?.members ?? [];
   const currentMember = familyMembers.find((member) => member.id === familyData?.session.memberId) ?? familyMembers[0];
   const currentName = String(currentMember?.name ?? 'Familie');
@@ -22,6 +24,10 @@ export function FamilyDashboard() {
   const savedOpenItems = familyData?.shopping.filter((item) => !Boolean(item.checked)).length ?? 0;
   const savedRecipeCount = familyData?.recipes.length ?? 0;
   const storedChores = familyData?.chores ?? [];
+  const reminders = now && currentMember ? storedChores.filter((chore) => {
+    if (chore.completed_at || (chore.assigned_member_id && chore.assigned_member_id !== currentMember.id)) return false;
+    return Number(chore.due_at) * 1000 <= now.getTime() + 24 * 60 * 60 * 1000;
+  }).sort((a, b) => Number(a.due_at) - Number(b.due_at)) : [];
   const dashboardChores = now ? storedChores.filter((chore) => !chore.completed_at && new Date(Number(chore.due_at) * 1000).toDateString() === now.toDateString()).slice(0, 3) : [];
   const weekStart = now ? new Date(now) : null;
   if (weekStart) { weekStart.setHours(0, 0, 0, 0); weekStart.setDate(weekStart.getDate() - ((weekStart.getDay() + 6) % 7)); }
@@ -45,9 +51,33 @@ export function FamilyDashboard() {
   useEffect(() => {
     const updateClock = () => setNow(new Date());
     updateClock();
+    if ('Notification' in window) setBrowserPermission(Notification.permission);
     const timer = window.setInterval(updateClock, 60_000);
     return () => window.clearInterval(timer);
   }, []);
+
+  useEffect(() => {
+    if (!now || browserPermission !== 'granted' || !reminders.length) return;
+    const sent = new Set(JSON.parse(localStorage.getItem('family-base-notified') ?? '[]') as string[]);
+    for (const chore of reminders) {
+      const key = `${String(chore.id)}:${String(chore.due_at)}`;
+      if (sent.has(key)) continue;
+      const overdue = Number(chore.due_at) * 1000 < now.getTime();
+      new Notification(overdue ? 'Putzaufgabe überfällig' : 'Putzaufgabe steht an', {
+        body: String(chore.title),
+        icon: '/favicon.svg',
+        tag: key,
+      });
+      sent.add(key);
+    }
+    localStorage.setItem('family-base-notified', JSON.stringify([...sent].slice(-100)));
+  }, [browserPermission, now, reminders]);
+
+  const enableBrowserNotifications = async () => {
+    if (!('Notification' in window)) return;
+    const permission = await Notification.requestPermission();
+    setBrowserPermission(permission);
+  };
 
   useEffect(() => {
     void fetch('/api/family').then(async (response) => { if (response.ok) setFamilyData(await response.json() as FamilyData); }).catch(() => undefined);
@@ -80,7 +110,7 @@ export function FamilyDashboard() {
       <div className="sidebar-bottom"><p>FAMILIE</p><div className="member-stack">{familyMembers.map((member) => <span key={String(member.id)} style={{ background: String(member.color ?? '#8cc8ff') }} title={String(member.name)}>{String(member.name).slice(0, 2).toUpperCase()}</span>)}<button aria-label="Mitglied hinzufügen" onClick={() => setActive('Administration')}><Plus /></button></div><button className={`settings ${active === 'Administration' ? 'nav-active' : ''}`} onClick={() => { setActive('Administration'); setMenuOpen(false); }}><Settings /><span>Administration</span></button><div className="profile"><span className="avatar" style={{ background: String(currentMember?.color ?? '#ffb36b') }}>{initials}</span><span><strong>{currentName}</strong><small>{currentMember?.role === 'admin' ? 'Administrator/in' : currentMember?.role === 'child' ? 'Kind' : 'Mitglied'}</small></span><ChevronRight /></div></div>
     </aside>
 
-    <main className="main-content"><header className="topbar"><button className="menu-button" onClick={() => setMenuOpen(true)} aria-label="Menü öffnen"><Menu /></button><div><p>{currentDate}</p><h1>{greeting}, {currentName.split(' ')[0]} <span>👋</span></h1></div><div className="top-actions"><label className="search"><Search /><input placeholder="Suchen …" aria-label="Suchen" /></label><Button className="quick-add"><Plus /> Neu hinzufügen</Button><button className="profile-mini" aria-label="Profil"><CircleUserRound /></button></div></header>
+    <main className="main-content"><header className="topbar"><button className="menu-button" onClick={() => setMenuOpen(true)} aria-label="Menü öffnen"><Menu /></button><div><p>{currentDate}</p><h1>{greeting}, {currentName.split(' ')[0]} <span>👋</span></h1></div><div className="top-actions"><label className="search"><Search /><input placeholder="Suchen …" aria-label="Suchen" /></label><div className="notification-anchor"><button className="notification-button" onClick={() => setNotificationsOpen((open) => !open)} aria-label="Benachrichtigungen" aria-expanded={notificationsOpen}><Bell />{reminders.length > 0 && <em>{reminders.length}</em>}</button>{notificationsOpen && <section className="notification-panel"><header><div><span>BENACHRICHTIGUNGEN</span><h2>Deine Erinnerungen</h2></div><button onClick={() => setNotificationsOpen(false)} aria-label="Schließen"><X /></button></header><div className="notification-list">{reminders.length ? reminders.map((chore) => { const due = new Date(Number(chore.due_at) * 1000); const overdue = Boolean(now && due.getTime() < now.getTime()); return <button key={String(chore.id)} onClick={() => { setActive('Putzplan'); setNotificationsOpen(false); }}><span className={overdue ? 'reminder-icon overdue' : 'reminder-icon'}><BellRing /></span><span><strong>{String(chore.title)}</strong><small>{overdue ? `Überfällig seit ${due.toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' })}` : `Fällig ${due.toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' })}`}</small></span><ChevronRight /></button>; }) : <div className="notification-empty"><Check /><span>Aktuell ist nichts fällig.</span></div>}</div><footer><button onClick={() => void enableBrowserNotifications()} disabled={browserPermission === 'granted'}><Bell />{browserPermission === 'granted' ? 'Browser-Meldungen aktiviert' : browserPermission === 'denied' ? 'Im Browser blockiert' : 'Browser-Meldungen aktivieren'}</button><div><Mail /><span><b>E-Mail-Erinnerungen</b><small>Absenderdienst noch verbinden</small></span></div></footer></section>}</div><Button className="quick-add"><Plus /> Neu hinzufügen</Button><button className="profile-mini" aria-label="Profil"><CircleUserRound /></button></div></header>
 
       {active === 'Übersicht' ? <><section className="stats-row" aria-label="Tagesübersicht"><article><span className="stat-icon lime"><CalendarDays /></span><div><strong>{todayEvents.length}</strong><small>Termine heute</small></div><em>{todayEvents.length ? 'Alle im Blick' : 'Keine Termine'}</em></article><article><span className="stat-icon orange"><ShoppingBasket /></span><div><strong>{savedOpenItems}</strong><small>Offene Einkäufe</small></div><em>{savedOpenItems ? 'Liste geteilt' : 'Liste leer'}</em></article><article><span className="stat-icon blue"><ClipboardCheck /></span><div><strong>{dashboardChores.length}</strong><small>Putzaufgaben heute</small></div><em>+{todayPoints} Punkte</em></article><article><span className="stat-icon violet"><CookingPot /></span><div><strong>{savedRecipeCount}</strong><small>Gespeicherte Rezepte</small></div><em>{savedRecipeCount ? 'Sammlung öffnen' : 'Noch keine Rezepte'}</em></article></section><div className="dashboard-grid">
         <section className="panel calendar-panel"><div className="panel-title"><div><span>HEUTE</span><h2>{todayTitle}</h2></div><Button variant="ghost" onClick={() => setActive('Kalender')}>Kalender öffnen <ChevronRight /></Button></div><div className="day-strip">{weekDays.map((day) => { const selected = now?.toDateString() === day.toDateString(); return <button key={day.toISOString()} className={selected ? 'selected-day' : ''} onClick={() => setActive('Kalender')}><small>{day.toLocaleDateString('de-DE', { weekday: 'short' })}</small><strong>{day.getDate()}</strong>{selected && <i />}</button>; })}</div><div className="events">{todayEvents.length ? todayEvents.map((event) => { const member = familyMembers.find((item) => item.id === event.member_id); const who = event.is_shared ? 'Alle' : String(member?.name ?? 'Privat'); const color = String(event.is_shared ? '#c7f36c' : member?.color ?? '#8cc8ff'); const time = event.all_day ? 'Ganztägig' : new Date(Number(event.starts_at) * 1000).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }); return <div className="event" key={String(event.id)}><time>{time}</time><i style={{ background: color }} /><div><strong>{String(event.title)}</strong><small>{who}{event.all_day ? '' : ` · ${time} Uhr`}</small></div><span className="person-dot" style={{ background: color }}>{who.slice(0,1)}</span></div>; }) : <div className="dashboard-empty"><CalendarDays /><span>Heute sind keine Termine eingetragen.</span></div>}</div></section>
