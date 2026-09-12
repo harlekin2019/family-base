@@ -19,8 +19,9 @@ const catalogSeed = `Äpfel|Obst & Gemüse|1 kg;Bananen|Obst & Gemüse|1 kg;Oran
 
 async function ensureCatalog() {
   const products = [...catalogSeed, ...extendedCatalog];
+  const expectedCount = new Set(products.map(([name]) => name.toLocaleLowerCase('de-DE'))).size;
   const count = await env.DB.prepare('SELECT COUNT(*) AS count FROM product_catalog').first<{ count: number }>();
-  if (Number(count?.count) >= products.length) return;
+  if (Number(count?.count) >= expectedCount) return;
   for (let offset = 0; offset < products.length; offset += 75) {
     await env.DB.batch(products.slice(offset, offset + 75).map(([name, category, quantity], index) => env.DB.prepare('INSERT OR IGNORE INTO product_catalog (id, name, category, default_quantity) VALUES (?, ?, ?, ?)').bind(`product_${offset + index + 1}`, name, category, quantity)));
   }
