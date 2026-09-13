@@ -34,6 +34,38 @@ class FamilyRepository(private val context:Context){
     fun cached()=parse(cache.getString("snapshot",null)?:"{}")
     fun sync():FamilySnapshot { val text=request("GET",null);cache.edit().putString("snapshot",text).apply();return parse(text) }
     fun complete(type:String,id:String):FamilySnapshot { val action=when(type){"shopping"->"toggle-shopping";"todo"->"toggle-todo";else->"complete-chore"};val text=request("POST",JSONObject().put("action",action).put("id",id).toString());cache.edit().putString("snapshot",text).apply();return parse(text) }
-    private fun request(method:String,body:String?):String { val base=config.server();val token=config.token();require(base.isNotBlank()&&token.isNotBlank()){ "Bitte Server und Gerätezugang einrichten." };val connection=(URL("$base/api/mobile").openConnection() as HttpURLConnection).apply{requestMethod=method;connectTimeout=12000;readTimeout=12000;setRequestProperty("Authorization","Bearer $token");setRequestProperty("Accept","application/json");if(body!=null){doOutput=true;setRequestProperty("Content-Type","application/json");outputStream.use{it.write(body.toByteArray())}}};val code=connection.responseCode;val text=(if(code in 200..299)connection.inputStream else connection.errorStream).bufferedReader().use{it.readText()};if(code !in 200..299)throw IllegalStateException(JSONObject(text).optString("error","Serverfehler $code"));return text }
+    private fun request(method: String, body: String?): String {
+        val base = config.server()
+        val token = config.token()
+        require(base.isNotBlank() && token.isNotBlank()) {
+            "Bitte Server und Gerätezugang einrichten."
+        }
+        val connection = URL("$base/api/mobile").openConnection() as HttpURLConnection
+        connection.requestMethod = method
+        connection.connectTimeout = 12_000
+        connection.readTimeout = 12_000
+        connection.setRequestProperty("Authorization", "Bearer $token")
+        connection.setRequestProperty("Accept", "application/json")
+        if (body != null) {
+            connection.doOutput = true
+            connection.setRequestProperty("Content-Type", "application/json")
+            connection.outputStream.use { stream ->
+                stream.write(body.toByteArray())
+            }
+        }
+        val code = connection.responseCode
+        val responseStream = if (code in 200..299) {
+            connection.inputStream
+        } else {
+            connection.errorStream
+        }
+        val responseText = responseStream.bufferedReader().use { it.readText() }
+        if (code !in 200..299) {
+            throw IllegalStateException(
+                JSONObject(responseText).optString("error", "Serverfehler $code")
+            )
+        }
+        return responseText
+    }
     private fun parse(text:String):FamilySnapshot { val root=JSONObject(text);fun items(name:String,title:String,detail:String)=root.optJSONArray(name)?.let{arr->(0 until arr.length()).map{arr.getJSONObject(it)}.map{FamilyItem(it.getString("id"),it.optString(title),it.optString(detail))}}?: emptyList();return FamilySnapshot(root.optJSONObject("member")?.optString("name").orEmpty(),items("shopping","name","quantity"),items("todos","title","project"),items("chores","title","points")) }
 }
