@@ -105,7 +105,7 @@ async function processEmailReminders(s: Session) {
 async function loadAll(s: Session) {
   const db = env.DB;
   await ensureCatalog();
-  const [members, recipes, shopping, projects, todos, events, chores, catalog, emailSettings] = await Promise.all([
+  const [members, recipes, shopping, projects, todos, events, chores, catalog, emailSettings, deviceTokens] = await Promise.all([
     db.prepare('SELECT * FROM members WHERE family_id = ? ORDER BY name').bind(s.familyId).all(),
     db.prepare('SELECT * FROM recipes WHERE family_id = ? ORDER BY title').bind(s.familyId).all(),
     db.prepare('SELECT * FROM shopping_items WHERE family_id = ? ORDER BY checked, rowid DESC').bind(s.familyId).all(),
@@ -115,8 +115,9 @@ async function loadAll(s: Session) {
     db.prepare('SELECT * FROM chores WHERE family_id = ? ORDER BY completed_at IS NOT NULL, due_at').bind(s.familyId).all(),
     db.prepare('SELECT * FROM product_catalog ORDER BY category, name').all(),
     db.prepare('SELECT * FROM email_settings WHERE family_id = ?').bind(s.familyId).first(),
+    db.prepare('SELECT id, member_id, name, created_at, last_used_at FROM device_tokens WHERE family_id = ? AND revoked_at IS NULL ORDER BY created_at DESC').bind(s.familyId).all(),
   ]);
-  return { session: s, members: members.results, recipes: recipes.results, shopping: shopping.results, projects: projects.results, todos: todos.results, events: events.results, chores: chores.results, catalog: catalog.results, emailSettings: emailSettings ?? null, mailConfigured: Boolean((env as RuntimeEnv).RESEND_API_KEY) };
+  return { session: s, members: members.results, recipes: recipes.results, shopping: shopping.results, projects: projects.results, todos: todos.results, events: events.results, chores: chores.results, catalog: catalog.results, emailSettings: emailSettings ?? null, deviceTokens: deviceTokens.results, mailConfigured: Boolean((env as RuntimeEnv).RESEND_API_KEY) };
 }
 
 export async function GET(request: Request) {
@@ -133,6 +134,7 @@ export async function POST(request: Request) {
   const action = String(body.action ?? '');
   const db = env.DB;
   const text = (key: string) => String(body[key] ?? '').trim();
+  let deviceToken: string | undefined;
   try {
     if (action === 'create-shopping') await db.prepare('INSERT INTO shopping_items (id, family_id, name, quantity, category, checked) VALUES (?, ?, ?, ?, ?, false)').bind(id('shop'), s.familyId, text('name'), text('quantity'), text('category') || 'Sonstiges').run();
     else if (action === 'toggle-shopping') await db.prepare('UPDATE shopping_items SET checked = NOT checked WHERE id = ? AND family_id = ?').bind(text('id'), s.familyId).run();
@@ -215,6 +217,22 @@ export async function POST(request: Request) {
       await db.prepare('UPDATE email_settings SET last_test_at = ?, last_test_status = ? WHERE family_id = ?').bind(Math.floor(Date.now() / 1000), status, s.familyId).run();
       if (!response.ok) return json({ error: 'Der Versanddienst hat die Test-E-Mail abgelehnt. Bitte Absender und API-Schlüssel prüfen.' }, 400);
     }
+    else if (action === 'create-device-token') {
+      const memberId = text('memberId') || s.memberId;
+      const member = await db.prepare('SELECT id FROM members WHERE id = ? AND family_id = ?').bind(memberId, s.familyId).first();
+      if (!member) return json({ error: 'Mitglied nicht gefunden.' }, 404);
+      if (s.role !== 'admin' && memberId !== s.memberId) return json({ error: 'Keine Berechtigung für dieses Mitglied.' }, 403);
+      deviceToken = `fb_${crypto.randomUUID().replaceAll('-', '')}${crypto.randomUUID().replaceAll('-', '')}`;
+      const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(deviceToken));
+      const tokenHash = [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+      await db.prepare('INSERT INTO device_tokens (id, family_id, member_id, name, token_hash, created_at) VALUES (?, ?, ?, ?, ?, ?)').bind(id('device'), s.familyId, memberId, text('name') || 'Android Smartphone', tokenHash, Math.floor(Date.now() / 1000)).run();
+    }
+    else if (action === 'revoke-device-token') {
+      const token = await db.prepare('SELECT member_id FROM device_tokens WHERE id = ? AND family_id = ? AND revoked_at IS NULL').bind(text('id'), s.familyId).first<{ member_id: string }>();
+      if (!token) return json({ error: 'Gerät nicht gefunden.' }, 404);
+      if (s.role !== 'admin' && token.member_id !== s.memberId) return json({ error: 'Keine Berechtigung für dieses Gerät.' }, 403);
+      await db.prepare('UPDATE device_tokens SET revoked_at = ? WHERE id = ? AND family_id = ?').bind(Math.floor(Date.now() / 1000), text('id'), s.familyId).run();
+    }
     else if (action === 'create-recipe') await db.prepare('INSERT INTO recipes (id, family_id, title, source_url, image_url, description, duration, prep_time, cook_time, servings, ingredients, instructions) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(id('recipe'), s.familyId, text('title'), text('sourceUrl') || null, text('imageUrl') || null, text('description') || null, Number(body.duration) || null, Number(body.prepTime) || null, Number(body.cookTime) || null, Number(body.servings) || 4, text('ingredients') || '[]', text('instructions') || '[]').run();
     else if (action === 'recipe-to-shopping') {
       const recipe = await db.prepare('SELECT id, ingredients FROM recipes WHERE id = ? AND family_id = ?').bind(text('id'), s.familyId).first<{ id: string; ingredients: string }>();
@@ -256,7 +274,7 @@ export async function POST(request: Request) {
       if (existing) await db.prepare('UPDATE recipes SET title = ?, image_url = ?, description = ?, duration = ?, prep_time = ?, cook_time = ?, servings = ?, ingredients = ?, instructions = ? WHERE id = ? AND family_id = ?').bind(...values, existing.id, s.familyId).run();
       else await db.prepare('INSERT INTO recipes (id, family_id, title, source_url, image_url, description, duration, prep_time, cook_time, servings, ingredients, instructions) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(id('recipe'), s.familyId, values[0], url.toString(), ...values.slice(1)).run();
     } else return json({ error: 'Unbekannte Aktion' }, 400);
-    return json(await loadAll(s));
+    return json({ ...(await loadAll(s)), ...(deviceToken ? { deviceToken } : {}) });
   } catch (error) {
     return json({ error: error instanceof Error ? error.message : 'Aktion fehlgeschlagen' }, 400);
   }

@@ -38,3 +38,10 @@ next-env.d.ts
 /.wrangler/
 /outputs/
 /work/
+
+# Android Studio / Gradle
+/android/.gradle/
+/android/.idea/
+/android/local.properties
+/android/**/build/
+*.iml

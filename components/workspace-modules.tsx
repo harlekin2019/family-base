@@ -25,6 +25,9 @@ import {
   Mail,
   Send,
   ShieldCheck,
+  Smartphone,
+  KeyRound,
+  Copy,
 } from 'lucide-react';
 
 type Row = Record<string, string | number | boolean | null>;
@@ -39,6 +42,7 @@ export type FamilyData = {
   chores: Row[];
   catalog: Row[];
   emailSettings: Row | null;
+  deviceTokens: Row[];
   mailConfigured: boolean;
 };
 const empty: FamilyData = {
@@ -52,6 +56,7 @@ const empty: FamilyData = {
   chores: [],
   catalog: [],
   emailSettings: null,
+  deviceTokens: [],
   mailConfigured: false,
 };
 const field = (form: FormData, key: string) =>
@@ -141,11 +146,13 @@ export function WorkspaceModule({
       setData(result);
       onDataChange?.(result);
       setModal('');
+      return result;
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Aktion fehlgeschlagen.');
     } finally {
       setBusy(false);
     }
+    return undefined;
   };
   const submit =
     (action: string, mapper?: (form: FormData) => Record<string, unknown>) =>
@@ -185,7 +192,7 @@ export function WorkspaceModule({
 
 type ViewProps = {
   data: FamilyData;
-  act: (payload: Record<string, unknown>) => Promise<void>;
+  act: (payload: Record<string, unknown>) => Promise<(FamilyData & { deviceToken?: string }) | undefined>;
   submit: (
     action: string,
     mapper?: (form: FormData) => Record<string, unknown>,
@@ -959,6 +966,7 @@ function ChoreView({ data, act, submit, modal, setModal }: ViewProps) {
 
 function AdminView({ data, act, submit }: ViewProps) {
   const [editing, setEditing] = useState<Row | null>(null);
+  const [deviceToken, setDeviceToken] = useState('');
   const remove = (member: Row) => {
     if (
       window.confirm(
@@ -1079,6 +1087,16 @@ function AdminView({ data, act, submit }: ViewProps) {
           <div className="mail-secret-note"><ShieldCheck /><span><b>API-Schlüssel geschützt</b><small>Wird später einmalig als geheime Website-Einstellung hinterlegt und kann hier nicht angezeigt werden.</small></span></div>
           <Button variant="outline" disabled={!data.mailConfigured || !data.emailSettings?.sender_email} onClick={() => void act({ action: 'test-email' })}><Send /> Test-E-Mail an mich senden</Button>
           {data.emailSettings?.last_test_status && <p className="mail-test-status">Letzter Test: {String(data.emailSettings.last_test_status)}{data.emailSettings.last_test_at ? ` · ${dateText(data.emailSettings.last_test_at)}` : ''}</p>}
+        </section>
+        <section className="admin-card email-settings-card device-access-card">
+          <div className="email-settings-title"><h3><Smartphone /> Smartphone &amp; Widgets</h3><Badge variant="outline">{data.deviceTokens.length} verbunden</Badge></div>
+          <p>Erzeuge einen persönlichen Zugang für die native Android-App. Der Schlüssel wird nur einmal angezeigt und kann jederzeit widerrufen werden.</p>
+          <form onSubmit={(event) => { event.preventDefault(); const form = new FormData(event.currentTarget); void act({ action: 'create-device-token', name: field(form, 'name'), memberId: field(form, 'memberId') }).then((result) => setDeviceToken(result?.deviceToken ?? '')); }}>
+            <div className="form-row"><label className="field-label"><span>Gerätename</span><Input name="name" defaultValue="Android Smartphone" required /></label><label className="field-label"><span>Familienmitglied</span><MemberSelect members={data.members} name="memberId" /></label></div>
+            <Button type="submit"><KeyRound /> Gerätezugang erzeugen</Button>
+          </form>
+          {deviceToken && <div className="device-token-result"><strong>Jetzt in die Android-App kopieren</strong><code>{deviceToken}</code><Button variant="outline" onClick={() => void navigator.clipboard.writeText(deviceToken)}><Copy /> Kopieren</Button><small>Dieser Schlüssel wird nach dem Verlassen nicht erneut angezeigt.</small></div>}
+          <div className="device-token-list">{data.deviceTokens.map((token) => <div key={String(token.id)}><span><b>{String(token.name)}</b><small>{token.last_used_at ? `Zuletzt verwendet: ${dateText(token.last_used_at)}` : `Erstellt: ${dateText(token.created_at)}`}</small></span><Button size="icon-sm" variant="destructive" aria-label={`${String(token.name)} widerrufen`} onClick={() => void act({ action: 'revoke-device-token', id: token.id })}><Trash2 /></Button></div>)}</div>
         </section>
       </div>
       {editing && (

@@ -48,3 +48,13 @@ export const emailDeliveries = sqliteTable('email_deliveries', {
   dueAt: integer('due_at', { mode: 'timestamp' }).notNull(),
   sentAt: integer('sent_at', { mode: 'timestamp' }).notNull(),
 }, (table) => [uniqueIndex('idx_email_delivery_once').on(table.choreId, table.recipientEmail, table.kind, table.dueAt)]);
+export const deviceTokens = sqliteTable('device_tokens', {
+  id: text('id').primaryKey(),
+  familyId: text('family_id').notNull().references(() => families.id),
+  memberId: text('member_id').notNull().references(() => members.id),
+  name: text('name').notNull(),
+  tokenHash: text('token_hash').notNull().unique(),
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+  lastUsedAt: integer('last_used_at', { mode: 'timestamp' }),
+  revokedAt: integer('revoked_at', { mode: 'timestamp' }),
+});
