@@ -67,5 +67,24 @@ class FamilyRepository(private val context:Context){
         }
         return responseText
     }
-    private fun parse(text:String):FamilySnapshot { val root=JSONObject(text);fun items(name:String,title:String,detail:String)=root.optJSONArray(name)?.let{arr->(0 until arr.length()).map{arr.getJSONObject(it)}.map{FamilyItem(it.getString("id"),it.optString(title),it.optString(detail))}}?: emptyList();return FamilySnapshot(root.optJSONObject("member")?.optString("name").orEmpty(),items("shopping","name","quantity"),items("todos","title","project"),items("chores","title","points")) }
+    private fun parse(text: String): FamilySnapshot {
+        val root = JSONObject(text)
+        fun items(arrayName: String, titleName: String, detailName: String): List<FamilyItem> {
+            val array = root.optJSONArray(arrayName) ?: return emptyList()
+            return (0 until array.length()).map { index ->
+                val item = array.getJSONObject(index)
+                FamilyItem(
+                    id = item.getString("id"),
+                    title = item.optString(titleName),
+                    detail = item.optString(detailName)
+                )
+            }
+        }
+        return FamilySnapshot(
+            member = root.optJSONObject("member")?.optString("name").orEmpty(),
+            shopping = items("shopping", "name", "quantity"),
+            todos = items("todos", "title", "project"),
+            chores = items("chores", "title", "points")
+        )
+    }
 }
