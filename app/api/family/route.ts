@@ -2,7 +2,7 @@ import { env } from 'cloudflare:workers';
 import { extendedCatalog } from '@/lib/product-catalog';
 
 type Session = { familyId: string; memberId: string; role: string; name: string };
-type RuntimeEnv = typeof env & { RESEND_API_KEY?: string };
+type RuntimeEnv = typeof env & { RESEND_API_KEY?: string; DOCKER_TRUST_PROXY?: string };
 const json = (data: unknown, status = 200) => Response.json(data, { status });
 const id = (prefix: string) => `${prefix}_${crypto.randomUUID()}`;
 type ChoreRule = { frequency: 'weekly' | 'biweekly' | 'monthly'; weekdays: number[]; rotationMemberIds: string[] };
@@ -56,8 +56,12 @@ async function ensureCatalog() {
 }
 
 async function session(request: Request): Promise<Session | null> {
-  const userId = request.headers.get('oai-authenticated-user-id');
-  const email = request.headers.get('oai-authenticated-user-email');
+  const runtimeEnv = env as RuntimeEnv;
+  const proxyIdentityAllowed = runtimeEnv.DOCKER_TRUST_PROXY === 'true';
+  const proxyEmail = proxyIdentityAllowed ? request.headers.get('x-auth-request-email') ?? request.headers.get('remote-email') ?? request.headers.get('x-forwarded-email') : null;
+  const proxyUser = proxyIdentityAllowed ? request.headers.get('x-auth-request-user') ?? request.headers.get('remote-user') : null;
+  const userId = request.headers.get('oai-authenticated-user-id') ?? (proxyEmail ? `proxy:${proxyUser ?? proxyEmail}` : null);
+  const email = request.headers.get('oai-authenticated-user-email') ?? proxyEmail;
   if (!userId || !email || !env.DB) return null;
   let member = await env.DB.prepare('SELECT id, family_id, role, name FROM members WHERE user_id = ? OR (email = ? AND user_id IS NULL) LIMIT 1').bind(userId, email).first<{ id: string; family_id: string; role: string; name: string }>();
   if (member) {
@@ -66,7 +70,7 @@ async function session(request: Request): Promise<Session | null> {
   }
   const familyId = id('family');
   const memberId = id('member');
-  const displayName = decodeURIComponent(request.headers.get('oai-authenticated-user-full-name') ?? email.split('@')[0]);
+  const displayName = decodeURIComponent(request.headers.get('oai-authenticated-user-full-name') ?? (proxyIdentityAllowed ? request.headers.get('x-auth-request-name') ?? '' : '') || email.split('@')[0]);
   await env.DB.batch([
     env.DB.prepare('INSERT INTO families (id, name, created_at) VALUES (?, ?, ?)').bind(familyId, `Familie ${displayName}`, Math.floor(Date.now() / 1000)),
     env.DB.prepare("INSERT INTO members (id, family_id, user_id, name, email, role, color, points) VALUES (?, ?, ?, ?, ?, 'admin', '#c7f36c', 0)").bind(memberId, familyId, userId, displayName, email),

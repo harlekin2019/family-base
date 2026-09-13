@@ -1,0 +1,28 @@
+services:
+  family-base:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: family-base
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-Europe/Berlin}
+      PORT: 3000
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+    volumes:
+      - family_base_data:/data
+    networks:
+      - reverse_proxy
+    expose:
+      - "3000"
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  family_base_data:
+    name: family_base_data
+
+networks:
+  reverse_proxy:
+    external: true
+    name: ${PROXY_NETWORK:-proxy}

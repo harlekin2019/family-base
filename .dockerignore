@@ -1,0 +1,12 @@
+.git
+.openai
+.vinext
+.wrangler
+dist
+node_modules
+outputs
+work
+.env*
+*.tar.gz
+npm-debug.log*
+pnpm-debug.log*
