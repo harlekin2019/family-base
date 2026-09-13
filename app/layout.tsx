@@ -9,6 +9,7 @@ export const metadata: Metadata = {
   metadataBase: new URL('https://familio-planer.michael217682.chatgpt.site'),
   title: 'Family Base – Gemeinsam organisiert',
   description: 'Der gemeinsame Planer für Termine, Einkäufe, Rezepte und Aufgaben.',
+  icons: { icon: '/family-base-logo.png', apple: '/family-base-logo.png' },
   openGraph: {
     title: 'Family Base – Gemeinsam organisiert',
     description: 'Der gemeinsame Planer für Termine, Einkäufe, Rezepte und Aufgaben.',
