@@ -2,6 +2,7 @@ import { env } from 'cloudflare:workers';
 import { extendedCatalog } from '@/lib/product-catalog';
 
 type Session = { familyId: string; memberId: string; role: string; name: string };
+type RuntimeEnv = typeof env & { RESEND_API_KEY?: string };
 const json = (data: unknown, status = 200) => Response.json(data, { status });
 const id = (prefix: string) => `${prefix}_${crypto.randomUUID()}`;
 type ChoreRule = { frequency: 'weekly' | 'biweekly' | 'monthly'; weekdays: number[]; rotationMemberIds: string[] };
@@ -73,10 +74,34 @@ async function session(request: Request): Promise<Session | null> {
   return { familyId, memberId, role: 'admin', name: displayName };
 }
 
+const safeHtml = (value: unknown) => String(value ?? '').replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char] ?? char);
+async function processEmailReminders(s: Session) {
+  const apiKey = (env as RuntimeEnv).RESEND_API_KEY;
+  if (!apiKey) return;
+  const settings = await env.DB.prepare('SELECT * FROM email_settings WHERE family_id = ? AND enabled = 1').bind(s.familyId).first<Record<string, unknown>>();
+  if (!settings?.sender_email) return;
+  const now = Math.floor(Date.now() / 1000);
+  const leadSeconds = Math.max(3600, Number(settings.lead_minutes || 1440) * 60);
+  const chores = await env.DB.prepare(`SELECT c.id, c.title, c.due_at, c.points, m.name AS member_name, m.email
+    FROM chores c JOIN members m ON m.id = c.assigned_member_id
+    WHERE c.family_id = ? AND c.completed_at IS NULL AND m.email IS NOT NULL AND m.email != ''
+      AND c.due_at <= ? ORDER BY c.due_at LIMIT 10`).bind(s.familyId, now + leadSeconds).all<Record<string, unknown>>();
+  for (const chore of chores.results) {
+    const overdue = Number(chore.due_at) < now;
+    if (overdue && !settings.overdue_enabled) continue;
+    const kind = overdue ? `overdue-${new Date(now * 1000).toISOString().slice(0, 10)}` : 'upcoming';
+    const alreadySent = await env.DB.prepare('SELECT 1 FROM email_deliveries WHERE chore_id = ? AND recipient_email = ? AND kind = ? AND due_at = ?').bind(chore.id, chore.email, kind, chore.due_at).first();
+    if (alreadySent) continue;
+    const dueText = new Date(Number(chore.due_at) * 1000).toLocaleString('de-DE', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Europe/Berlin' });
+    const response = await fetch('https://api.resend.com/emails', { method: 'POST', headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' }, body: JSON.stringify({ from: `${settings.sender_name} <${settings.sender_email}>`, to: [chore.email], reply_to: settings.reply_to || undefined, subject: overdue ? `Überfällig: ${chore.title}` : `Erinnerung: ${chore.title}`, html: `<div style="font-family:Arial,sans-serif;color:#202420"><h2>${overdue ? 'Aufgabe überfällig' : 'Aufgabe steht an'}</h2><p>Hallo ${safeHtml(chore.member_name)},</p><p><strong>${safeHtml(chore.title)}</strong> ist ${overdue ? 'seit' : 'am'} ${safeHtml(dueText)} fällig.</p><p>Für die Erledigung gibt es ${Number(chore.points || 0)} Punkte.</p><p style="color:#667066">Family Base</p></div>` }) });
+    if (response.ok) await env.DB.prepare('INSERT INTO email_deliveries (id, family_id, chore_id, recipient_email, kind, due_at, sent_at) VALUES (?, ?, ?, ?, ?, ?, ?)').bind(id('mail'), s.familyId, chore.id, chore.email, kind, chore.due_at, now).run();
+  }
+}
+
 async function loadAll(s: Session) {
   const db = env.DB;
   await ensureCatalog();
-  const [members, recipes, shopping, projects, todos, events, chores, catalog] = await Promise.all([
+  const [members, recipes, shopping, projects, todos, events, chores, catalog, emailSettings] = await Promise.all([
     db.prepare('SELECT * FROM members WHERE family_id = ? ORDER BY name').bind(s.familyId).all(),
     db.prepare('SELECT * FROM recipes WHERE family_id = ? ORDER BY title').bind(s.familyId).all(),
     db.prepare('SELECT * FROM shopping_items WHERE family_id = ? ORDER BY checked, rowid DESC').bind(s.familyId).all(),
@@ -85,13 +110,15 @@ async function loadAll(s: Session) {
     db.prepare('SELECT * FROM events WHERE family_id = ? ORDER BY starts_at').bind(s.familyId).all(),
     db.prepare('SELECT * FROM chores WHERE family_id = ? ORDER BY completed_at IS NOT NULL, due_at').bind(s.familyId).all(),
     db.prepare('SELECT * FROM product_catalog ORDER BY category, name').all(),
+    db.prepare('SELECT * FROM email_settings WHERE family_id = ?').bind(s.familyId).first(),
   ]);
-  return { session: s, members: members.results, recipes: recipes.results, shopping: shopping.results, projects: projects.results, todos: todos.results, events: events.results, chores: chores.results, catalog: catalog.results };
+  return { session: s, members: members.results, recipes: recipes.results, shopping: shopping.results, projects: projects.results, todos: todos.results, events: events.results, chores: chores.results, catalog: catalog.results, emailSettings: emailSettings ?? null, mailConfigured: Boolean((env as RuntimeEnv).RESEND_API_KEY) };
 }
 
 export async function GET(request: Request) {
   const s = await session(request);
   if (!s) return json({ error: 'Nicht angemeldet' }, 401);
+  await processEmailReminders(s);
   return json(await loadAll(s));
 }
 
@@ -163,6 +190,26 @@ export async function POST(request: Request) {
         db.prepare('UPDATE chores SET assigned_member_id = NULL WHERE assigned_member_id = ? AND family_id = ?').bind(target.id, s.familyId),
         db.prepare('DELETE FROM members WHERE id = ? AND family_id = ?').bind(target.id, s.familyId),
       ]);
+    }
+    else if (action === 'update-email-settings') {
+      if (s.role !== 'admin') return json({ error: 'Nur Administratoren dürfen E-Mail-Einstellungen ändern.' }, 403);
+      const leadMinutes = [60, 360, 720, 1440, 2880].includes(Number(body.leadMinutes)) ? Number(body.leadMinutes) : 1440;
+      await db.prepare(`INSERT INTO email_settings (family_id, provider, sender_name, sender_email, reply_to, lead_minutes, overdue_enabled, enabled)
+        VALUES (?, 'resend', ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(family_id) DO UPDATE SET sender_name=excluded.sender_name, sender_email=excluded.sender_email, reply_to=excluded.reply_to, lead_minutes=excluded.lead_minutes, overdue_enabled=excluded.overdue_enabled, enabled=excluded.enabled`)
+        .bind(s.familyId, text('senderName') || 'Family Base', text('senderEmail'), text('replyTo'), leadMinutes, body.overdueEnabled ? 1 : 0, body.enabled ? 1 : 0).run();
+    }
+    else if (action === 'test-email') {
+      if (s.role !== 'admin') return json({ error: 'Nur Administratoren dürfen Test-E-Mails versenden.' }, 403);
+      const apiKey = (env as RuntimeEnv).RESEND_API_KEY;
+      if (!apiKey) return json({ error: 'Der geschützte API-Schlüssel ist noch nicht hinterlegt.' }, 400);
+      const settings = await db.prepare('SELECT * FROM email_settings WHERE family_id = ?').bind(s.familyId).first<Record<string, unknown>>();
+      const recipient = await db.prepare('SELECT email FROM members WHERE id = ? AND family_id = ?').bind(s.memberId, s.familyId).first<{ email: string | null }>();
+      if (!settings?.sender_email || !recipient?.email) return json({ error: 'Absender- und Empfängeradresse müssen vollständig sein.' }, 400);
+      const response = await fetch('https://api.resend.com/emails', { method: 'POST', headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' }, body: JSON.stringify({ from: `${settings.sender_name} <${settings.sender_email}>`, to: [recipient.email], reply_to: settings.reply_to || undefined, subject: 'Family Base – Test der E-Mail-Erinnerungen', html: '<div style="font-family:Arial,sans-serif;color:#202420"><h2>E-Mail-Erinnerungen sind bereit</h2><p>Diese Testnachricht bestätigt, dass Family Base E-Mails versenden kann.</p></div>' }) });
+      const status = response.ok ? 'Erfolgreich versendet' : `Fehlgeschlagen (${response.status})`;
+      await db.prepare('UPDATE email_settings SET last_test_at = ?, last_test_status = ? WHERE family_id = ?').bind(Math.floor(Date.now() / 1000), status, s.familyId).run();
+      if (!response.ok) return json({ error: 'Der Versanddienst hat die Test-E-Mail abgelehnt. Bitte Absender und API-Schlüssel prüfen.' }, 400);
     }
     else if (action === 'create-recipe') await db.prepare('INSERT INTO recipes (id, family_id, title, source_url, image_url, description, duration, prep_time, cook_time, servings, ingredients, instructions) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(id('recipe'), s.familyId, text('title'), text('sourceUrl') || null, text('imageUrl') || null, text('description') || null, Number(body.duration) || null, Number(body.prepTime) || null, Number(body.cookTime) || null, Number(body.servings) || 4, text('ingredients') || '[]', text('instructions') || '[]').run();
     else if (action === 'recipe-to-shopping') {

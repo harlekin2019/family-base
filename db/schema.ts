@@ -27,3 +27,24 @@ export const events = sqliteTable('events', {
 export const chores = sqliteTable('chores', {
   id: text('id').primaryKey(), familyId: text('family_id').notNull().references(() => families.id), title: text('title').notNull(), assignedMemberId: text('assigned_member_id').references(() => members.id), dueAt: integer('due_at', { mode: 'timestamp' }).notNull(), repeatRule: text('repeat_rule'), points: integer('points').notNull().default(1), completedAt: integer('completed_at', { mode: 'timestamp' }),
 });
+export const emailSettings = sqliteTable('email_settings', {
+  familyId: text('family_id').primaryKey().references(() => families.id),
+  provider: text('provider').notNull().default('resend'),
+  senderName: text('sender_name').notNull().default('Family Base'),
+  senderEmail: text('sender_email').notNull().default(''),
+  replyTo: text('reply_to').notNull().default(''),
+  leadMinutes: integer('lead_minutes').notNull().default(1440),
+  overdueEnabled: integer('overdue_enabled', { mode: 'boolean' }).notNull().default(true),
+  enabled: integer('enabled', { mode: 'boolean' }).notNull().default(false),
+  lastTestAt: integer('last_test_at', { mode: 'timestamp' }),
+  lastTestStatus: text('last_test_status'),
+});
+export const emailDeliveries = sqliteTable('email_deliveries', {
+  id: text('id').primaryKey(),
+  familyId: text('family_id').notNull().references(() => families.id),
+  choreId: text('chore_id').notNull().references(() => chores.id),
+  recipientEmail: text('recipient_email').notNull(),
+  kind: text('kind').notNull(),
+  dueAt: integer('due_at', { mode: 'timestamp' }).notNull(),
+  sentAt: integer('sent_at', { mode: 'timestamp' }).notNull(),
+}, (table) => [uniqueIndex('idx_email_delivery_once').on(table.choreId, table.recipientEmail, table.kind, table.dueAt)]);

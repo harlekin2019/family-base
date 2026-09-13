@@ -22,6 +22,9 @@ import {
   Trash2,
   Trophy,
   Users,
+  Mail,
+  Send,
+  ShieldCheck,
 } from 'lucide-react';
 
 type Row = Record<string, string | number | boolean | null>;
@@ -35,6 +38,8 @@ export type FamilyData = {
   events: Row[];
   chores: Row[];
   catalog: Row[];
+  emailSettings: Row | null;
+  mailConfigured: boolean;
 };
 const empty: FamilyData = {
   session: {},
@@ -46,6 +51,8 @@ const empty: FamilyData = {
   events: [],
   chores: [],
   catalog: [],
+  emailSettings: null,
+  mailConfigured: false,
 };
 const field = (form: FormData, key: string) =>
   String(form.get(key) ?? '').trim();
@@ -1044,6 +1051,34 @@ function AdminView({ data, act, submit }: ViewProps) {
               </span>
             </div>
           ))}
+        </section>
+        <section className="admin-card email-settings-card">
+          <div className="email-settings-title">
+            <h3><Mail /> E-Mail-Erinnerungen</h3>
+            <Badge variant="outline" className={data.mailConfigured ? 'mail-ready' : 'mail-pending'}>
+              {data.mailConfigured ? 'Versanddienst verbunden' : 'API-Schlüssel fehlt'}
+            </Badge>
+          </div>
+          <p>Versandregeln und Absender werden hier verwaltet. Der API-Schlüssel bleibt geschützt in den Website-Einstellungen und wird niemals in der Familiendatenbank gespeichert.</p>
+          <form onSubmit={submit('update-email-settings', (form) => ({
+            senderName: field(form, 'senderName'), senderEmail: field(form, 'senderEmail'),
+            replyTo: field(form, 'replyTo'), leadMinutes: Number(field(form, 'leadMinutes')),
+            overdueEnabled: form.get('overdueEnabled') === 'on', enabled: form.get('enabled') === 'on',
+          }))}>
+            <label className="field-label"><span>Versanddienst</span><select className="control" disabled><option>Resend</option></select></label>
+            <div className="form-row">
+              <label className="field-label"><span>Absendername</span><Input name="senderName" defaultValue={String(data.emailSettings?.sender_name ?? 'Family Base')} required /></label>
+              <label className="field-label"><span>Absenderadresse</span><Input name="senderEmail" type="email" defaultValue={String(data.emailSettings?.sender_email ?? '')} placeholder="erinnerung@ihre-domain.de" required /></label>
+            </div>
+            <label className="field-label"><span>Antwortadresse (optional)</span><Input name="replyTo" type="email" defaultValue={String(data.emailSettings?.reply_to ?? '')} placeholder="familie@ihre-domain.de" /></label>
+            <label className="field-label"><span>Erinnerung vor Fälligkeit</span><select name="leadMinutes" className="control" defaultValue={String(data.emailSettings?.lead_minutes ?? 1440)}><option value="60">1 Stunde vorher</option><option value="360">6 Stunden vorher</option><option value="720">12 Stunden vorher</option><option value="1440">1 Tag vorher</option><option value="2880">2 Tage vorher</option></select></label>
+            <label className="checkline"><input name="overdueEnabled" type="checkbox" defaultChecked={data.emailSettings?.overdue_enabled !== 0} /> Auch bei überfälligen Aufgaben erinnern</label>
+            <label className="checkline"><input name="enabled" type="checkbox" defaultChecked={Boolean(data.emailSettings?.enabled)} /> E-Mail-Erinnerungen nach Verbindung aktivieren</label>
+            <Button type="submit">Einstellungen speichern</Button>
+          </form>
+          <div className="mail-secret-note"><ShieldCheck /><span><b>API-Schlüssel geschützt</b><small>Wird später einmalig als geheime Website-Einstellung hinterlegt und kann hier nicht angezeigt werden.</small></span></div>
+          <Button variant="outline" disabled={!data.mailConfigured || !data.emailSettings?.sender_email} onClick={() => void act({ action: 'test-email' })}><Send /> Test-E-Mail an mich senden</Button>
+          {data.emailSettings?.last_test_status && <p className="mail-test-status">Letzter Test: {String(data.emailSettings.last_test_status)}{data.emailSettings.last_test_at ? ` · ${dateText(data.emailSettings.last_test_at)}` : ''}</p>}
         </section>
       </div>
       {editing && (
