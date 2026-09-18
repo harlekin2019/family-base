@@ -53,6 +53,22 @@ proxy_set_header X-Auth-Request-User $remote_user;
 proxy_set_header X-Forwarded-Email $remote_user;
 ```
 
+Wenn die Android-App verwendet wird, muss deren token-geschützte Schnittstelle von der Browser-Anmeldung ausgenommen werden. Zusätzlich im Reiter **Advanced** eintragen und die Beispiel-IP ersetzen:
+
+```nginx
+location ^~ /api/mobile {
+    auth_basic off;
+    proxy_set_header Authorization $http_authorization;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_pass http://192.168.1.50:3000;
+}
+```
+
+Die mobile Schnittstelle bleibt durch den widerrufbaren Gerätezugang geschützt. Alle normalen Webseitenaufrufe bleiben hinter der Nginx-Proxy-Manager-Zugriffsliste.
+
 Alternativ kann Authentik oder Authelia mindestens einen dieser E-Mail-Header setzen:
 
 - `X-Auth-Request-Email`
