@@ -50,6 +50,7 @@ private val cleaningCatalog = mapOf(
     "Gesamtes Zuhause" to listOf("Mülleimer leeren", "Getränkekisten einräumen", "Mülltonnen rausstellen", "Staubsaugen", "Böden wischen")
 )
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun FamilyBaseApp(repo: FamilyRepository) {
     val context = LocalContext.current
@@ -186,7 +187,7 @@ private fun EntryCard(item: FamilyItem, kind: String, memberName: String, onDone
             }
             if (detail.isNotBlank()) Text(detail, style = MaterialTheme.typography.bodySmall, color = Color.Gray)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                TextButton(onClick = onDone) { Text(if (kind == "shopping") "Abhaken" else "Erledigt") }
+                TextButton(onClick = { onDone(kind, item.id) }) { Text(if (kind == "shopping") "Abhaken" else "Erledigt") }
                 TextButton(onClick = onEdit) { Text("Ändern") }
                 TextButton(onClick = onDelete, colors = ButtonDefaults.textButtonColors(contentColor = ErrorRed)) { Text("Löschen") }
             }
