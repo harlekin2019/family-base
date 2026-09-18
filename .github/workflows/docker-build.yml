@@ -12,6 +12,7 @@ on:
       - "public/**"
       - "Dockerfile"
       - ".dockerignore"
+      - "compose.portainer.yml"
       - "package.json"
       - "pnpm-lock.yaml"
       - "pnpm-workspace.yaml"

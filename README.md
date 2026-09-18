@@ -8,24 +8,52 @@ Voraussetzungen:
 
 - Docker-Umgebung auf Proxmox
 - Portainer mit Zugriff auf diese Umgebung
-- vorhandener Reverse Proxy mit HTTPS
-- eine vorgeschaltete Anmeldung, die eine bestätigte E-Mail-Adresse als HTTP-Header übergibt (z. B. Authentik oder Authelia)
-- ein bereits vorhandenes gemeinsames Docker-Netzwerk zwischen Reverse Proxy und Family Base
+- Nginx Proxy Manager in einer eigenen Proxmox-VM
+- beide VMs sind über die Proxmox-Bridge beziehungsweise das lokale Netzwerk erreichbar
+- eine Domain, die auf Nginx Proxy Manager zeigt
 
 ### Stack aus Git bereitstellen
 
 1. In Portainer **Stacks → Add stack → Repository** öffnen.
-2. Die URL dieses GitHub-Projekts eintragen.
-3. Als Compose-Datei `compose.portainer.yml` verwenden.
-4. Unter Umgebungsvariablen `PROXY_NETWORK` auf den Namen des bestehenden Proxy-Netzwerks setzen.
-5. Den Stack bereitstellen.
-6. Im Reverse Proxy ein Ziel auf `http://family-base:3000` anlegen und HTTPS erzwingen.
+2. Als Repository `https://github.com/harlekin2019/family-base.git` eintragen.
+3. Als Referenz `refs/heads/main` und als Compose-Datei `compose.portainer.yml` verwenden.
+4. Unter Umgebungsvariablen `FAMILY_BASE_BIND_IP` auf die LAN-IP der Portainer-/Docker-VM setzen.
+5. `FAMILY_BASE_PORT` auf `3000` und `TZ` auf `Europe/Berlin` setzen.
+6. Optional `RESEND_API_KEY` für E-Mail-Erinnerungen hinterlegen.
+7. Den Stack bereitstellen.
+8. Die Anwendung im LAN über `http://<FAMILY_BASE_BIND_IP>:3000/api/health` prüfen. Die Antwort muss `status: ok` enthalten.
 
-Es wird bewusst kein Host-Port veröffentlicht. Nur Container im gemeinsamen Proxy-Netzwerk können Family Base erreichen.
+Das frühere Docker-Netzwerk `PROXY_NETWORK` wird bei getrennten VMs nicht verwendet. Port 3000 wird als Ziel für Nginx Proxy Manager an der LAN-IP der Family-Base-VM veröffentlicht.
+
+### Nginx Proxy Manager in der separaten VM
+
+Unter **Hosts → Proxy Hosts → Add Proxy Host**:
+
+- Domain Names: die gewünschte Family-Base-Domain
+- Scheme: `http`
+- Forward Hostname / IP: LAN-IP der Portainer-/Docker-VM
+- Forward Port: `3000`
+- Websockets Support: aktivieren
+- Block Common Exploits: aktivieren
+
+Unter **SSL** ein Let's-Encrypt-Zertifikat anfordern und **Force SSL**, **HTTP/2 Support** und **HSTS Enabled** aktivieren.
 
 ## Anmeldung am Reverse Proxy
 
-Der vorgeschaltete Anmeldedienst muss mindestens einen dieser E-Mail-Header setzen:
+Family Base akzeptiert im Docker-Betrieb nur eine durch den Reverse Proxy bestätigte E-Mail-Adresse. Mit der integrierten Nginx-Proxy-Manager-Zugriffsliste lässt sich das ohne weiteren Dienst einrichten:
+
+1. Unter **Access Lists** eine Liste `Family Base` anlegen.
+2. Unter **Authorization** für jedes Familienmitglied einen Benutzer anlegen. Als Benutzernamen die jeweilige vollständige E-Mail-Adresse verwenden.
+3. Diese Access List dem Family-Base-Proxy-Host zuordnen.
+4. Im Reiter **Advanced** des Proxy Hosts eintragen:
+
+```nginx
+proxy_set_header X-Auth-Request-Email $remote_user;
+proxy_set_header X-Auth-Request-User $remote_user;
+proxy_set_header X-Forwarded-Email $remote_user;
+```
+
+Alternativ kann Authentik oder Authelia mindestens einen dieser E-Mail-Header setzen:
 
 - `X-Auth-Request-Email`
 - `Remote-Email`
@@ -33,7 +61,7 @@ Der vorgeschaltete Anmeldedienst muss mindestens einen dieser E-Mail-Header setz
 
 Optional werden `X-Auth-Request-User` und `X-Auth-Request-Name` ausgewertet. Der Reverse Proxy muss eingehende gleichnamige Header von externen Clients entfernen und ausschließlich die vom Anmeldedienst bestätigten Werte neu setzen.
 
-Ohne bestätigten E-Mail-Header verweigert das Backend den Zugriff. Der Container darf deshalb nicht direkt ins Internet veröffentlicht werden.
+Ohne bestätigten E-Mail-Header verweigert das Web-Backend den Zugriff. Port `3000` darf deshalb nicht über den Internet-Router weitergeleitet werden. Von außen werden ausschließlich die HTTPS-Ports von Nginx Proxy Manager verwendet.
 
 ## Daten und Sicherung
 

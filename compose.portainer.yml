@@ -11,18 +11,11 @@ services:
       RESEND_API_KEY: ${RESEND_API_KEY:-}
     volumes:
       - family_base_data:/data
-    networks:
-      - reverse_proxy
-    expose:
-      - "3000"
+    ports:
+      - "${FAMILY_BASE_BIND_IP:-0.0.0.0}:${FAMILY_BASE_PORT:-3000}:3000"
     security_opt:
       - no-new-privileges:true
 
 volumes:
   family_base_data:
     name: family_base_data
-
-networks:
-  reverse_proxy:
-    external: true
-    name: ${PROXY_NETWORK:-proxy}
