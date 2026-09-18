@@ -230,9 +230,11 @@ private fun ChoreDialog(item: FamilyItem?, data: FamilySnapshot, dismiss: () -> 
     var due by remember { mutableStateOf(formatEditorDate(item?.dueAt ?: 0).ifBlank { formatEditorDate(System.currentTimeMillis() / 1000 + 3600) }) }
     var points by remember { mutableStateOf((item?.points?.takeIf { it > 0 } ?: 10).toString()) }
     var repeat by remember { mutableStateOf(repeatValue(item?.repeatRule.orEmpty())) }
-    var rotate by remember { mutableStateOf(false) }
-    val rotationMembers = remember { mutableStateListOf<String>() }
-    val weekdays = remember { mutableStateListOf<Int>() }
+    val storedRotation = remember(item?.repeatRule) { ruleStrings(item?.repeatRule.orEmpty(), "rotationMemberIds") }
+    val storedWeekdays = remember(item?.repeatRule) { ruleNumbers(item?.repeatRule.orEmpty(), "weekdays") }
+    var rotate by remember { mutableStateOf(storedRotation.isNotEmpty()) }
+    val rotationMembers = remember { mutableStateListOf<String>().apply { addAll(storedRotation) } }
+    val weekdays = remember { mutableStateListOf<Int>().apply { addAll(storedWeekdays) } }
     val valid = title.isNotBlank() && parseDate(due) != null && points.toIntOrNull() != null
     FormDialog(if (item == null) "Putzaufgabe hinzufügen" else "Putzaufgabe ändern", dismiss, valid, {
         save(mapOf("title" to title, "memberId" to memberId, "dueAt" to parseDate(due), "points" to points.toIntOrNull(), "repeatRule" to repeat, "weekdays" to JSONArray(weekdays), "rotationMemberIds" to JSONArray(if (rotate) rotationMembers else emptyList<String>())))
@@ -311,3 +313,15 @@ private fun formatEditorDate(seconds: Long) = formatDate(seconds)
 private fun parseDate(value: String): Long? = if (value.isBlank()) null else try { SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.GERMANY).apply { isLenient = false }.parse(value)?.time?.div(1000) } catch (_: Exception) { null }
 private fun repeatValue(value: String) = when { value.contains("biweekly") -> "biweekly"; value.contains("weekly") -> "weekly"; value.contains("monthly") -> "monthly"; else -> "" }
 private fun repeatLabel(value: String) = when (repeatValue(value)) { "weekly" -> "wöchentlich"; "biweekly" -> "alle 2 Wochen"; "monthly" -> "monatlich"; else -> "" }
+private fun ruleStrings(value: String, key: String): List<String> {
+    return try {
+        val array = org.json.JSONObject(value).optJSONArray(key) ?: return emptyList()
+        (0 until array.length()).map { array.optString(it) }.filter { it.isNotBlank() }
+    } catch (_: Exception) { emptyList() }
+}
+private fun ruleNumbers(value: String, key: String): List<Int> {
+    return try {
+        val array = org.json.JSONObject(value).optJSONArray(key) ?: return emptyList()
+        (0 until array.length()).map { array.optInt(it) }.filter { it in 1..7 }
+    } catch (_: Exception) { emptyList() }
+}
