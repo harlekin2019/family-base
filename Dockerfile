@@ -16,7 +16,9 @@ ENV NODE_ENV=production \
     PORT=3000 \
     TZ=Europe/Berlin
 COPY --from=build /app /app
-RUN chmod +x /app/docker/entrypoint.sh
+RUN mkdir -p /app/dist/server/migrations \
+    && cp /app/drizzle/*.sql /app/dist/server/migrations/ \
+    && chmod +x /app/docker/entrypoint.sh
 VOLUME ["/data"]
 EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 CMD wget -qO- http://127.0.0.1:3000/api/health || exit 1
