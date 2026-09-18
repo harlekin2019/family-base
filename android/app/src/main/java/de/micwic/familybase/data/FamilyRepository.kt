@@ -12,8 +12,26 @@ import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
-data class FamilyItem(val id:String,val title:String,val detail:String="")
-data class FamilySnapshot(val member:String="",val shopping:List<FamilyItem> = emptyList(),val todos:List<FamilyItem> = emptyList(),val chores:List<FamilyItem> = emptyList())
+data class FamilyItem(
+    val id: String,
+    val title: String,
+    val detail: String = "",
+    val category: String = "",
+    val projectId: String = "",
+    val memberId: String = "",
+    val dueAt: Long = 0,
+    val points: Int = 0,
+    val repeatRule: String = ""
+)
+data class Choice(val id: String, val name: String)
+data class FamilySnapshot(
+    val member: String = "",
+    val shopping: List<FamilyItem> = emptyList(),
+    val todos: List<FamilyItem> = emptyList(),
+    val chores: List<FamilyItem> = emptyList(),
+    val members: List<Choice> = emptyList(),
+    val projects: List<Choice> = emptyList()
+)
 
 class SecureConfig(private val context:Context) {
     private val prefs=context.getSharedPreferences("family_base",Context.MODE_PRIVATE)
@@ -34,6 +52,13 @@ class FamilyRepository(private val context:Context){
     fun cached()=parse(cache.getString("snapshot",null)?:"{}")
     fun sync():FamilySnapshot { val text=request("GET",null);cache.edit().putString("snapshot",text).apply();return parse(text) }
     fun complete(type:String,id:String):FamilySnapshot { val action=when(type){"shopping"->"toggle-shopping";"todo"->"toggle-todo";else->"complete-chore"};val text=request("POST",JSONObject().put("action",action).put("id",id).toString());cache.edit().putString("snapshot",text).apply();return parse(text) }
+    fun mutate(action: String, values: Map<String, Any?>): FamilySnapshot {
+        val body = JSONObject().put("action", action)
+        values.forEach { (key, value) -> body.put(key, value ?: JSONObject.NULL) }
+        val response = request("POST", body.toString())
+        cache.edit().putString("snapshot", response).apply()
+        return parse(response)
+    }
     private fun request(method: String, body: String?): String {
         val base = config.server()
         val token = config.token()
@@ -76,15 +101,30 @@ class FamilyRepository(private val context:Context){
                 FamilyItem(
                     id = item.getString("id"),
                     title = item.optString(titleName),
-                    detail = item.optString(detailName)
+                    detail = item.optString(detailName),
+                    category = item.optString("category"),
+                    projectId = item.optString("project_id"),
+                    memberId = item.optString("assigned_member_id"),
+                    dueAt = item.optLong("due_at"),
+                    points = item.optInt("points"),
+                    repeatRule = item.optString("repeat_rule")
                 )
+            }
+        }
+        fun choices(arrayName: String): List<Choice> {
+            val array = root.optJSONArray(arrayName) ?: return emptyList()
+            return (0 until array.length()).map { index ->
+                val item = array.getJSONObject(index)
+                Choice(item.getString("id"), item.optString("name"))
             }
         }
         return FamilySnapshot(
             member = root.optJSONObject("member")?.optString("name").orEmpty(),
             shopping = items("shopping", "name", "quantity"),
             todos = items("todos", "title", "project"),
-            chores = items("chores", "title", "points")
+            chores = items("chores", "title", "points"),
+            members = choices("members"),
+            projects = choices("projects")
         )
     }
 }
