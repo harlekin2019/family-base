@@ -31,6 +31,30 @@ jobs:
         with:
           context: .
           push: false
+          load: true
           tags: family-base:test
           cache-from: type=gha
           cache-to: type=gha,mode=max
+      - name: Container starten und Healthcheck prüfen
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run -d --name family-base-test -p 3000:3000 family-base:test
+          trap 'docker logs family-base-test || true; docker rm -f family-base-test || true' EXIT
+
+          for attempt in {1..24}; do
+            if curl --fail --silent http://127.0.0.1:3000/api/health >/dev/null; then
+              echo "Family Base ist erreichbar."
+              exit 0
+            fi
+
+            if ! docker inspect -f '{{.State.Running}}' family-base-test | grep -q true; then
+              echo "Der Container wurde unerwartet beendet."
+              exit 1
+            fi
+
+            sleep 5
+          done
+
+          echo "Der Healthcheck hat nicht rechtzeitig geantwortet."
+          exit 1
