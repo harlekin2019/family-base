@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+args=()
+for arg in "$@"; do
+  if [[ "$arg" == /* ]]; then
+    args+=("$(wslpath -w "$arg")")
+  else
+    args+=("$arg")
+  fi
+done
+exec '/mnt/c/Users/Harlekin/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node.exe' "${args[@]}"
