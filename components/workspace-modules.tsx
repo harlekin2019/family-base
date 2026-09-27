@@ -112,11 +112,11 @@ export function WorkspaceModule({
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState('');
   const [modal, setModal] = useState('');
-  const refresh = async () => {
-    setBusy(true);
+  const refresh = async (showBusy = true) => {
+    if (showBusy) setBusy(true);
     setError('');
     try {
-      const response = await fetch('/api/family');
+      const response = await fetch('/api/family', { cache: 'no-store' });
       const result = (await response.json()) as FamilyData & { error?: string };
       if (!response.ok) throw new Error(result.error);
       setData(result);
@@ -126,11 +126,23 @@ export function WorkspaceModule({
         e instanceof Error ? e.message : 'Daten konnten nicht geladen werden.',
       );
     } finally {
-      setBusy(false);
+      if (showBusy) setBusy(false);
     }
   };
   useEffect(() => {
     void refresh();
+    const sync = () => void refresh(false);
+    const timer = window.setInterval(sync, 5_000);
+    const visible = () => {
+      if (document.visibilityState === 'visible') sync();
+    };
+    window.addEventListener('focus', sync);
+    document.addEventListener('visibilitychange', visible);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener('focus', sync);
+      document.removeEventListener('visibilitychange', visible);
+    };
   }, []);
   const act = async (payload: Record<string, unknown>) => {
     setBusy(true);
@@ -406,6 +418,19 @@ function ShoppingView({ data, act, submit }: ViewProps) {
           <Plus /> Hinzufügen
         </Button>
       </form>
+      <div className="list-actions">
+        <Button
+          variant="outline"
+          disabled={!data.shopping.some((item) => Boolean(item.checked))}
+          onClick={() => {
+            if (window.confirm('Alle abgehakten Einkaufsartikel dauerhaft löschen?')) {
+              void act({ action: 'clear-completed-shopping' });
+            }
+          }}
+        >
+          <Trash2 /> Erledigte Einträge löschen
+        </Button>
+      </div>
       <div className="category-grid">
         {categories.length ? (
           categories.map((category) => (
@@ -701,9 +726,22 @@ function TodoView({ data, act, submit, modal, setModal }: ViewProps) {
         <p className="module-copy">
           Organisiert Aufgaben in Projekten wie Urlaub, Renovierung oder Schule.
         </p>
-        <Button onClick={() => setModal('project')}>
-          <Plus /> Projekt
-        </Button>
+        <div className="module-toolbar-actions">
+          <Button
+            variant="outline"
+            disabled={!data.todos.some((todo) => Boolean(todo.completed))}
+            onClick={() => {
+              if (window.confirm('Alle erledigten Aufgaben dauerhaft löschen?')) {
+                void act({ action: 'clear-completed-todos' });
+              }
+            }}
+          >
+            <Trash2 /> Erledigte Einträge löschen
+          </Button>
+          <Button onClick={() => setModal('project')}>
+            <Plus /> Projekt
+          </Button>
+        </div>
       </div>
       <div className="project-grid">
         {data.projects.map((project) => (
@@ -794,20 +832,30 @@ function ChoreView({ data, act, submit, modal, setModal }: ViewProps) {
     <>
       <div className="module-toolbar">
         <p className="module-copy">
-          Erledigte Aufgaben schreiben die Punkte sofort dem zugeordneten
-          Mitglied gut.
+          Erledigte Aufgaben bleiben sichtbar und können wieder geöffnet werden.
         </p>
-        <Button onClick={() => setModal('chore')}>
-          <Plus /> Aufgabe
-        </Button>
+        <div className="module-toolbar-actions">
+          <Button
+            variant="outline"
+            disabled={!data.chores.some((chore) => Boolean(chore.completed_at))}
+            onClick={() => {
+              if (window.confirm('Alle erledigten Putzaufgaben dauerhaft löschen? Wiederholungen werden dabei auf den nächsten Termin gesetzt.')) {
+                void act({ action: 'clear-completed-chores' });
+              }
+            }}
+          >
+            <Trash2 /> Erledigte Einträge löschen
+          </Button>
+          <Button onClick={() => setModal('chore')}>
+            <Plus /> Aufgabe
+          </Button>
+        </div>
       </div>
       <div className="chore-board">
         <section>
-          <h3>Offen</h3>
-          {data.chores
-            .filter((c) => !c.completed_at)
-            .map((chore) => (
-              <article className="chore-item" key={String(chore.id)}>
+          <h3>Aufgaben</h3>
+          {data.chores.map((chore) => (
+              <article className={`chore-item ${chore.completed_at ? 'checked' : ''}`} key={String(chore.id)}>
                 <div className="chore-icon">
                   <ClipboardCheck />
                 </div>
@@ -823,15 +871,15 @@ function ChoreView({ data, act, submit, modal, setModal }: ViewProps) {
                 <Badge>+{Number(chore.points)} P</Badge>
                 <Button
                   onClick={() =>
-                    act({ action: 'complete-chore', id: chore.id })
+                    act({ action: 'toggle-chore', id: chore.id })
                   }
                 >
-                  Erledigt
+                  {chore.completed_at ? 'Wieder öffnen' : 'Erledigt'}
                 </Button>
               </article>
             ))}
-          {!data.chores.some((c) => !c.completed_at) && (
-            <Empty icon={<Check />} text="Alles erledigt – großartig!" />
+          {!data.chores.length && (
+            <Empty icon={<Check />} text="Noch keine Putzaufgaben vorhanden." />
           )}
         </section>
         <section className="ranking">

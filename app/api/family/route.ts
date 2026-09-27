@@ -3,7 +3,7 @@ import { extendedCatalog } from '@/lib/product-catalog';
 
 type Session = { familyId: string; memberId: string; role: string; name: string };
 type RuntimeEnv = typeof env & { RESEND_API_KEY?: string; DOCKER_TRUST_PROXY?: string };
-const json = (data: unknown, status = 200) => Response.json(data, { status });
+const json = (data: unknown, status = 200) => Response.json(data, { status, headers: { 'cache-control': 'no-store' } });
 const id = (prefix: string) => `${prefix}_${crypto.randomUUID()}`;
 type ChoreRule = { frequency: 'weekly' | 'biweekly' | 'monthly'; weekdays: number[]; rotationMemberIds: string[] };
 const choreRule = (value: unknown): ChoreRule | null => {
@@ -138,9 +138,11 @@ export async function POST(request: Request) {
   try {
     if (action === 'create-shopping') await db.prepare('INSERT INTO shopping_items (id, family_id, name, quantity, category, checked) VALUES (?, ?, ?, ?, ?, false)').bind(id('shop'), s.familyId, text('name'), text('quantity'), text('category') || 'Sonstiges').run();
     else if (action === 'toggle-shopping') await db.prepare('UPDATE shopping_items SET checked = NOT checked WHERE id = ? AND family_id = ?').bind(text('id'), s.familyId).run();
+    else if (action === 'clear-completed-shopping') await db.prepare('DELETE FROM shopping_items WHERE family_id = ? AND checked = true').bind(s.familyId).run();
     else if (action === 'create-project') await db.prepare('INSERT INTO projects (id, family_id, name, icon) VALUES (?, ?, ?, ?)').bind(id('project'), s.familyId, text('name'), text('icon') || '📌').run();
     else if (action === 'create-todo') await db.prepare('INSERT INTO todos (id, project_id, title, completed, assigned_member_id, due_at) SELECT ?, p.id, ?, false, ?, ? FROM projects p WHERE p.id = ? AND p.family_id = ?').bind(id('todo'), text('title'), text('memberId') || null, Number(body.dueAt) || null, text('projectId'), s.familyId).run();
     else if (action === 'toggle-todo') await db.prepare('UPDATE todos SET completed = NOT completed WHERE id = ? AND project_id IN (SELECT id FROM projects WHERE family_id = ?)').bind(text('id'), s.familyId).run();
+    else if (action === 'clear-completed-todos') await db.prepare('DELETE FROM todos WHERE completed = true AND project_id IN (SELECT id FROM projects WHERE family_id = ?)').bind(s.familyId).run();
     else if (action === 'create-event') await db.prepare('INSERT INTO events (id, family_id, title, starts_at, ends_at, member_id, is_shared, all_day) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').bind(id('event'), s.familyId, text('title'), Number(body.startsAt), Number(body.endsAt) || null, text('memberId') || null, body.isShared ? 1 : 0, body.allDay ? 1 : 0).run();
     else if (action === 'create-chore') {
       const frequency = ['weekly', 'biweekly', 'monthly'].includes(text('repeatRule')) ? text('repeatRule') as ChoreRule['frequency'] : null;
@@ -151,20 +153,25 @@ export async function POST(request: Request) {
       const rule = frequency ? JSON.stringify({ frequency, weekdays, rotationMemberIds }) : null;
       await db.prepare('INSERT INTO chores (id, family_id, title, assigned_member_id, due_at, repeat_rule, points) VALUES (?, ?, ?, ?, ?, ?, ?)').bind(id('chore'), s.familyId, text('title'), assignedMemberId, Number(body.dueAt), rule, Number(body.points) || 1).run();
     }
-    else if (action === 'complete-chore') {
-      const chore = await db.prepare('SELECT assigned_member_id, points, due_at, repeat_rule FROM chores WHERE id = ? AND family_id = ? AND completed_at IS NULL').bind(text('id'), s.familyId).first<{ assigned_member_id: string | null; points: number; due_at: number; repeat_rule: string | null }>();
+    else if (action === 'complete-chore' || action === 'toggle-chore') {
+      const chore = await db.prepare('SELECT assigned_member_id, points, completed_at FROM chores WHERE id = ? AND family_id = ?').bind(text('id'), s.familyId).first<{ assigned_member_id: string | null; points: number; completed_at: number | null }>();
       if (chore) {
+        const completing = !chore.completed_at;
+        const statements = [db.prepare('UPDATE chores SET completed_at = ? WHERE id = ? AND family_id = ?').bind(completing ? Math.floor(Date.now() / 1000) : null, text('id'), s.familyId)];
+        if (chore.assigned_member_id) statements.push(db.prepare(`UPDATE members SET points = MAX(0, points + ?) WHERE id = ? AND family_id = ?`).bind(completing ? chore.points : -chore.points, chore.assigned_member_id, s.familyId));
+        await db.batch(statements);
+      }
+    }
+    else if (action === 'clear-completed-chores') {
+      const completed = await db.prepare('SELECT id, assigned_member_id, due_at, repeat_rule FROM chores WHERE family_id = ? AND completed_at IS NOT NULL').bind(s.familyId).all<{ id: string; assigned_member_id: string | null; due_at: number; repeat_rule: string | null }>();
+      if (completed.results.length) await db.batch(completed.results.map((chore) => {
         const rule = choreRule(chore.repeat_rule);
-        const rotation = rule?.rotationMemberIds ?? [];
+        if (!rule) return db.prepare('DELETE FROM chores WHERE id = ? AND family_id = ?').bind(chore.id, s.familyId);
+        const rotation = rule.rotationMemberIds;
         const currentIndex = rotation.indexOf(chore.assigned_member_id ?? '');
         const nextMemberId = rotation.length ? rotation[(currentIndex + 1 + rotation.length) % rotation.length] : chore.assigned_member_id;
-        await db.batch([
-          rule
-            ? db.prepare('UPDATE chores SET due_at = ?, assigned_member_id = ?, completed_at = NULL WHERE id = ? AND family_id = ?').bind(nextChoreDue(chore.due_at, rule), nextMemberId, text('id'), s.familyId)
-            : db.prepare('UPDATE chores SET completed_at = ? WHERE id = ? AND family_id = ?').bind(Math.floor(Date.now() / 1000), text('id'), s.familyId),
-          db.prepare('UPDATE members SET points = points + ? WHERE id = ? AND family_id = ?').bind(chore.points, chore.assigned_member_id, s.familyId),
-        ]);
-      }
+        return db.prepare('UPDATE chores SET due_at = ?, assigned_member_id = ?, completed_at = NULL WHERE id = ? AND family_id = ?').bind(nextChoreDue(chore.due_at, rule), nextMemberId, chore.id, s.familyId);
+      }));
     }
     else if (action === 'create-member') {
       if (s.role !== 'admin') return json({ error: 'Nur Administratoren dürfen Mitglieder anlegen.' }, 403);

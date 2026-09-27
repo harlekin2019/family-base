@@ -53,9 +53,9 @@ async function familyMemberIds(familyId: string) {
 async function snapshot(s: MobileSession) {
   const now = Math.floor(Date.now() / 1000);
   const [shopping, todos, chores, members, projects] = await Promise.all([
-    env.DB.prepare('SELECT id,name,quantity,category,checked FROM shopping_items WHERE family_id=? AND checked=0 ORDER BY rowid DESC LIMIT 100').bind(s.familyId).all(),
-    env.DB.prepare(`SELECT t.id,t.title,t.due_at,t.assigned_member_id,t.project_id,p.name AS project FROM todos t JOIN projects p ON p.id=t.project_id WHERE p.family_id=? AND t.completed=0 ORDER BY CASE WHEN t.due_at IS NULL THEN 1 ELSE 0 END,t.due_at,t.rowid DESC LIMIT 100`).bind(s.familyId).all(),
-    env.DB.prepare(`SELECT id,title,due_at,points,assigned_member_id,repeat_rule FROM chores WHERE family_id=? AND completed_at IS NULL ORDER BY due_at,rowid DESC LIMIT 100`).bind(s.familyId).all(),
+    env.DB.prepare('SELECT id,name,quantity,category,checked FROM shopping_items WHERE family_id=? ORDER BY checked,rowid DESC LIMIT 100').bind(s.familyId).all(),
+    env.DB.prepare(`SELECT t.id,t.title,t.due_at,t.assigned_member_id,t.project_id,t.completed,p.name AS project FROM todos t JOIN projects p ON p.id=t.project_id WHERE p.family_id=? ORDER BY t.completed,CASE WHEN t.due_at IS NULL THEN 1 ELSE 0 END,t.due_at,t.rowid DESC LIMIT 100`).bind(s.familyId).all(),
+    env.DB.prepare(`SELECT id,title,due_at,points,assigned_member_id,repeat_rule,completed_at FROM chores WHERE family_id=? ORDER BY completed_at IS NOT NULL,due_at,rowid DESC LIMIT 100`).bind(s.familyId).all(),
     env.DB.prepare('SELECT id,name,color FROM members WHERE family_id=? ORDER BY name').bind(s.familyId).all(),
     env.DB.prepare('SELECT id,name,icon FROM projects WHERE family_id=? ORDER BY name').bind(s.familyId).all(),
   ]);
@@ -85,6 +85,8 @@ export async function POST(request: Request) {
       await db.prepare('DELETE FROM shopping_items WHERE id=? AND family_id=?').bind(itemId, session.familyId).run();
     } else if (action === 'toggle-shopping') {
       await db.prepare('UPDATE shopping_items SET checked=NOT checked WHERE id=? AND family_id=?').bind(itemId, session.familyId).run();
+    } else if (action === 'clear-completed-shopping') {
+      await db.prepare('DELETE FROM shopping_items WHERE family_id=? AND checked=1').bind(session.familyId).run();
     } else if (action === 'create-todo' || action === 'update-todo') {
       const title = text(body, 'title'); const projectId = text(body, 'projectId');
       if (!title || !projectId) return json({ error: 'Titel und Projekt werden benötigt.' }, 400);
@@ -101,6 +103,8 @@ export async function POST(request: Request) {
       await db.prepare('DELETE FROM todos WHERE id=? AND project_id IN (SELECT id FROM projects WHERE family_id=?)').bind(itemId, session.familyId).run();
     } else if (action === 'toggle-todo') {
       await db.prepare('UPDATE todos SET completed=NOT completed WHERE id=? AND project_id IN (SELECT id FROM projects WHERE family_id=?)').bind(itemId, session.familyId).run();
+    } else if (action === 'clear-completed-todos') {
+      await db.prepare('DELETE FROM todos WHERE completed=1 AND project_id IN (SELECT id FROM projects WHERE family_id=?)').bind(session.familyId).run();
     } else if (action === 'create-chore' || action === 'update-chore') {
       const title = text(body, 'title'); const dueAt = optionalNumber(body, 'dueAt');
       if (!title || !dueAt) return json({ error: 'Aufgabe und Termin werden benötigt.' }, 400);
@@ -115,18 +119,23 @@ export async function POST(request: Request) {
       }
     } else if (action === 'delete-chore') {
       await db.prepare('DELETE FROM chores WHERE id=? AND family_id=?').bind(itemId, session.familyId).run();
-    } else if (action === 'complete-chore') {
-      const chore = await db.prepare('SELECT assigned_member_id,points,due_at,repeat_rule FROM chores WHERE id=? AND family_id=? AND completed_at IS NULL').bind(itemId, session.familyId).first<{ assigned_member_id: string | null; points: number; due_at: number; repeat_rule: string | null }>();
+    } else if (action === 'complete-chore' || action === 'toggle-chore') {
+      const chore = await db.prepare('SELECT assigned_member_id,points,completed_at FROM chores WHERE id=? AND family_id=?').bind(itemId, session.familyId).first<{ assigned_member_id: string | null; points: number; completed_at: number | null }>();
       if (chore) {
-        const rule = parseRule(chore.repeat_rule); const rotation = rule?.rotationMemberIds ?? [];
-        const index = rotation.indexOf(chore.assigned_member_id ?? '');
-        const nextMember = rotation.length ? rotation[(index + 1 + rotation.length) % rotation.length] : chore.assigned_member_id;
-        const statements = [rule
-          ? db.prepare('UPDATE chores SET due_at=?,assigned_member_id=?,completed_at=NULL WHERE id=? AND family_id=?').bind(nextDue(chore.due_at, rule), nextMember, itemId, session.familyId)
-          : db.prepare('UPDATE chores SET completed_at=? WHERE id=? AND family_id=?').bind(Math.floor(Date.now() / 1000), itemId, session.familyId)];
-        if (chore.assigned_member_id) statements.push(db.prepare('UPDATE members SET points=points+? WHERE id=? AND family_id=?').bind(chore.points, chore.assigned_member_id, session.familyId));
+        const completing = !chore.completed_at;
+        const statements = [db.prepare('UPDATE chores SET completed_at=? WHERE id=? AND family_id=?').bind(completing ? Math.floor(Date.now() / 1000) : null, itemId, session.familyId)];
+        if (chore.assigned_member_id) statements.push(db.prepare('UPDATE members SET points=MAX(0,points+?) WHERE id=? AND family_id=?').bind(completing ? chore.points : -chore.points, chore.assigned_member_id, session.familyId));
         await db.batch(statements);
       }
+    } else if (action === 'clear-completed-chores') {
+      const completed = await db.prepare('SELECT id,assigned_member_id,due_at,repeat_rule FROM chores WHERE family_id=? AND completed_at IS NOT NULL').bind(session.familyId).all<{ id: string; assigned_member_id: string | null; due_at: number; repeat_rule: string | null }>();
+      if (completed.results.length) await db.batch(completed.results.map((chore) => {
+        const rule = parseRule(chore.repeat_rule);
+        if (!rule) return db.prepare('DELETE FROM chores WHERE id=? AND family_id=?').bind(chore.id, session.familyId);
+        const rotation = rule.rotationMemberIds; const index = rotation.indexOf(chore.assigned_member_id ?? '');
+        const nextMember = rotation.length ? rotation[(index + 1 + rotation.length) % rotation.length] : chore.assigned_member_id;
+        return db.prepare('UPDATE chores SET due_at=?,assigned_member_id=?,completed_at=NULL WHERE id=? AND family_id=?').bind(nextDue(chore.due_at, rule), nextMember, chore.id, session.familyId);
+      }));
     } else return json({ error: 'Unbekannte Aktion.' }, 400);
     return json(await snapshot(session));
   } catch (error) {

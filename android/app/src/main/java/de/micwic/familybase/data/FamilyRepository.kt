@@ -21,7 +21,8 @@ data class FamilyItem(
     val memberId: String = "",
     val dueAt: Long = 0,
     val points: Int = 0,
-    val repeatRule: String = ""
+    val repeatRule: String = "",
+    val completed: Boolean = false
 )
 data class Choice(val id: String, val name: String)
 data class FamilySnapshot(
@@ -51,7 +52,7 @@ class FamilyRepository(private val context:Context){
     fun configure(server:String,token:String)=config.save(server,token)
     fun cached()=parse(cache.getString("snapshot",null)?:"{}")
     fun sync():FamilySnapshot { val text=request("GET",null);cache.edit().putString("snapshot",text).apply();return parse(text) }
-    fun complete(type:String,id:String):FamilySnapshot { val action=when(type){"shopping"->"toggle-shopping";"todo"->"toggle-todo";else->"complete-chore"};val text=request("POST",JSONObject().put("action",action).put("id",id).toString());cache.edit().putString("snapshot",text).apply();return parse(text) }
+    fun complete(type:String,id:String):FamilySnapshot { val action=when(type){"shopping"->"toggle-shopping";"todo"->"toggle-todo";else->"toggle-chore"};val text=request("POST",JSONObject().put("action",action).put("id",id).toString());cache.edit().putString("snapshot",text).apply();return parse(text) }
     fun mutate(action: String, values: Map<String, Any?>): FamilySnapshot {
         val body = JSONObject().put("action", action)
         values.forEach { (key, value) -> body.put(key, value ?: JSONObject.NULL) }
@@ -107,7 +108,9 @@ class FamilyRepository(private val context:Context){
                     memberId = item.optString("assigned_member_id"),
                     dueAt = item.optLong("due_at"),
                     points = item.optInt("points"),
-                    repeatRule = item.optString("repeat_rule")
+                    repeatRule = item.optString("repeat_rule"),
+                    completed = item.optBoolean("checked") || item.optBoolean("completed") ||
+                        (!item.isNull("completed_at") && item.optLong("completed_at") > 0)
                 )
             }
         }

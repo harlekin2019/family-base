@@ -47,6 +47,12 @@ export function FamilyDashboard() {
     if (response.ok) setFamilyData(await response.json() as FamilyData);
   };
   const addItem = () => { const name = newItem.trim(); if (!name) return; setNewItem(''); void updateFamily({ action: 'create-shopping', name, quantity: '', category: 'Sonstiges' }); };
+  const refreshFamily = async () => {
+    try {
+      const response = await fetch('/api/family', { cache: 'no-store' });
+      if (response.ok) setFamilyData(await response.json() as FamilyData);
+    } catch { /* Der nächste automatische Abgleich versucht es erneut. */ }
+  };
 
   useEffect(() => {
     const updateClock = () => setNow(new Date());
@@ -80,7 +86,17 @@ export function FamilyDashboard() {
   };
 
   useEffect(() => {
-    void fetch('/api/family').then(async (response) => { if (response.ok) setFamilyData(await response.json() as FamilyData); }).catch(() => undefined);
+    void refreshFamily();
+    const sync = () => void refreshFamily();
+    const timer = window.setInterval(sync, 5_000);
+    const visible = () => { if (document.visibilityState === 'visible') sync(); };
+    window.addEventListener('focus', sync);
+    document.addEventListener('visibilitychange', visible);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener('focus', sync);
+      document.removeEventListener('visibilitychange', visible);
+    };
   }, []);
 
   useEffect(() => {

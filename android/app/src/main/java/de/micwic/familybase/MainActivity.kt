@@ -15,12 +15,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.dp
 import de.micwic.familybase.data.*
 import de.micwic.familybase.widget.WidgetUpdater
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -79,6 +81,16 @@ fun FamilyBaseApp(repo: FamilyRepository) {
         }
     }
 
+    LaunchedEffect(showSetup) {
+        if (!showSetup && repo.configured()) {
+            while (true) {
+                delay(5_000)
+                runCatching { withContext(Dispatchers.IO) { repo.sync() } }
+                    .onSuccess { current -> snapshot = current; WidgetUpdater.updateAll(context) }
+            }
+        }
+    }
+
     MaterialTheme(colorScheme = darkColorScheme(primary = Green, background = Background, surface = SurfaceDark)) {
         Scaffold(
             topBar = {
@@ -121,13 +133,19 @@ fun FamilyBaseApp(repo: FamilyRepository) {
                     contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 92.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    if (entries.isEmpty()) item { Card(Modifier.fillMaxWidth()) { Text("Aktuell keine offenen Einträge", modifier = Modifier.padding(22.dp), color = Color.Gray) } }
+                    if (entries.any { it.completed }) item {
+                        OutlinedButton(
+                            onClick = { runAction(listOf("clear-completed-shopping", "clear-completed-todos", "clear-completed-chores")[selectedTab]) },
+                            modifier = Modifier.fillMaxWidth()
+                        ) { Text("Erledigte Einträge löschen") }
+                    }
+                    if (entries.isEmpty()) item { Card(Modifier.fillMaxWidth()) { Text("Noch keine Einträge vorhanden", modifier = Modifier.padding(22.dp), color = Color.Gray) } }
                     items(entries, key = { it.id }) { item ->
                         EntryCard(
                             item = item,
                             kind = listOf("shopping", "todo", "chore")[selectedTab],
                             memberName = snapshot.members.firstOrNull { it.id == item.memberId }?.name.orEmpty(),
-                            onDone = { repoType, id -> runAction(when (repoType) { "shopping" -> "toggle-shopping"; "todo" -> "toggle-todo"; else -> "complete-chore" }, mapOf("id" to id)) },
+                            onDone = { repoType, id -> runAction(when (repoType) { "shopping" -> "toggle-shopping"; "todo" -> "toggle-todo"; else -> "toggle-chore" }, mapOf("id" to id)) },
                             onEdit = { editing = item; editor = listOf("shopping", "todo", "chore")[selectedTab] },
                             onDelete = { runAction("delete-${listOf("shopping", "todo", "chore")[selectedTab]}", mapOf("id" to item.id)) }
                         )
@@ -179,7 +197,12 @@ private fun ConnectionPanel(repo: FamilyRepository, secure: SecureConfig, snapsh
 private fun EntryCard(item: FamilyItem, kind: String, memberName: String, onDone: (String, String) -> Unit, onEdit: () -> Unit, onDelete: () -> Unit) {
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(14.dp)) {
-            Text(item.title, fontWeight = FontWeight.Bold)
+            Text(
+                item.title,
+                fontWeight = FontWeight.Bold,
+                color = if (item.completed) Color.Gray else Color.Unspecified,
+                textDecoration = if (item.completed) TextDecoration.LineThrough else TextDecoration.None
+            )
             val detail = when (kind) {
                 "shopping" -> listOf(item.detail, item.category).filter { it.isNotBlank() }.joinToString(" · ")
                 "todo" -> listOf(item.detail, memberName, formatDate(item.dueAt)).filter { it.isNotBlank() }.joinToString(" · ")
@@ -187,7 +210,7 @@ private fun EntryCard(item: FamilyItem, kind: String, memberName: String, onDone
             }
             if (detail.isNotBlank()) Text(detail, style = MaterialTheme.typography.bodySmall, color = Color.Gray)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                TextButton(onClick = { onDone(kind, item.id) }) { Text(if (kind == "shopping") "Abhaken" else "Erledigt") }
+                TextButton(onClick = { onDone(kind, item.id) }) { Text(if (item.completed) "Wieder öffnen" else if (kind == "shopping") "Abhaken" else "Erledigt") }
                 TextButton(onClick = onEdit) { Text("Ändern") }
                 TextButton(onClick = onDelete, colors = ButtonDefaults.textButtonColors(contentColor = ErrorRed)) { Text("Löschen") }
             }
