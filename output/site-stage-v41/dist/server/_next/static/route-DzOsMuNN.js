@@ -1,1 +1,0 @@
-var e=`force-dynamic`;async function t(){return Response.json({status:`ok`,service:`family-base`},{headers:{"cache-control":`no-store`}})}export{t as GET,e as dynamic};
