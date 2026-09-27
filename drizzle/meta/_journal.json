@@ -50,6 +50,13 @@
       "when": 1792000000000,
       "tag": "0006_mobile_device_tokens",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1793000000000,
+      "tag": "0007_google_calendar_import",
+      "breakpoints": true
     }
   ]
 }

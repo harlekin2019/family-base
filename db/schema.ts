@@ -22,8 +22,11 @@ export const todos = sqliteTable('todos', {
   id: text('id').primaryKey(), projectId: text('project_id').notNull().references(() => projects.id), title: text('title').notNull(), completed: integer('completed', { mode: 'boolean' }).notNull().default(false), assignedMemberId: text('assigned_member_id').references(() => members.id), dueAt: integer('due_at', { mode: 'timestamp' }),
 });
 export const events = sqliteTable('events', {
-  id: text('id').primaryKey(), familyId: text('family_id').notNull().references(() => families.id), title: text('title').notNull(), startsAt: integer('starts_at', { mode: 'timestamp' }).notNull(), endsAt: integer('ends_at', { mode: 'timestamp' }), memberId: text('member_id').references(() => members.id), isShared: integer('is_shared', { mode: 'boolean' }).notNull().default(false), allDay: integer('all_day', { mode: 'boolean' }).notNull().default(false),
-});
+  id: text('id').primaryKey(), familyId: text('family_id').notNull().references(() => families.id), title: text('title').notNull(), startsAt: integer('starts_at', { mode: 'timestamp' }).notNull(), endsAt: integer('ends_at', { mode: 'timestamp' }), memberId: text('member_id').references(() => members.id), isShared: integer('is_shared', { mode: 'boolean' }).notNull().default(false), allDay: integer('all_day', { mode: 'boolean' }).notNull().default(false), calendarFeedId: text('calendar_feed_id'), externalUid: text('external_uid'),
+}, (table) => [uniqueIndex('idx_events_feed_uid').on(table.calendarFeedId, table.externalUid)]);
+export const calendarFeeds = sqliteTable('calendar_feeds', {
+  id: text('id').primaryKey(), familyId: text('family_id').notNull().references(() => families.id), name: text('name').notNull(), icalUrl: text('ical_url').notNull(), memberId: text('member_id').references(() => members.id), isShared: integer('is_shared', { mode: 'boolean' }).notNull().default(false), enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true), lastSyncAt: integer('last_sync_at', { mode: 'timestamp' }), lastSyncStatus: text('last_sync_status'),
+}, (table) => [uniqueIndex('idx_calendar_feeds_family_url').on(table.familyId, table.icalUrl)]);
 export const chores = sqliteTable('chores', {
   id: text('id').primaryKey(), familyId: text('family_id').notNull().references(() => families.id), title: text('title').notNull(), assignedMemberId: text('assigned_member_id').references(() => members.id), dueAt: integer('due_at', { mode: 'timestamp' }).notNull(), repeatRule: text('repeat_rule'), points: integer('points').notNull().default(1), completedAt: integer('completed_at', { mode: 'timestamp' }),
 });

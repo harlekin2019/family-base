@@ -28,6 +28,7 @@ import {
   Smartphone,
   KeyRound,
   Copy,
+  RefreshCw,
 } from 'lucide-react';
 
 type Row = Record<string, string | number | boolean | null>;
@@ -43,6 +44,7 @@ export type FamilyData = {
   catalog: Row[];
   emailSettings: Row | null;
   deviceTokens: Row[];
+  calendarFeeds: Row[];
   mailConfigured: boolean;
 };
 const empty: FamilyData = {
@@ -57,6 +59,7 @@ const empty: FamilyData = {
   catalog: [],
   emailSettings: null,
   deviceTokens: [],
+  calendarFeeds: [],
   mailConfigured: false,
 };
 const field = (form: FormData, key: string) =>
@@ -290,9 +293,16 @@ function CalendarView({ data, act, submit, modal, setModal }: ViewProps) {
             </button>
           ))}
         </div>
-        <Button onClick={() => setModal('event')}>
-          <Plus /> Termin
-        </Button>
+        <div className="module-toolbar-actions">
+          {data.calendarFeeds.length > 0 && data.session.role === 'admin' && (
+            <Button variant="outline" onClick={() => void act({ action: 'sync-calendar-feeds' })}>
+              <RefreshCw /> Google-Kalender synchronisieren
+            </Button>
+          )}
+          <Button onClick={() => setModal('event')}>
+            <Plus /> Termin
+          </Button>
+        </div>
       </div>
       <div className={`week-grid calendar-${calendarView}`}>
         {days.map((day) => (
@@ -327,6 +337,7 @@ function CalendarView({ data, act, submit, modal, setModal }: ViewProps) {
                       ? 'Gemeinsam'
                       : ((data.members.find((m) => m.id === event.member_id)
                           ?.name as string) ?? 'Privat')}
+                    {event.calendar_feed_id ? ' · Google' : ''}
                   </small>
                 </div>
               ))}
@@ -1145,6 +1156,32 @@ function AdminView({ data, act, submit }: ViewProps) {
           </form>
           {deviceToken && <div className="device-token-result"><strong>Jetzt in die Android-App kopieren</strong><code>{deviceToken}</code><Button variant="outline" onClick={() => void navigator.clipboard.writeText(deviceToken)}><Copy /> Kopieren</Button><small>Dieser Schlüssel wird nach dem Verlassen nicht erneut angezeigt.</small></div>}
           <div className="device-token-list">{data.deviceTokens.map((token) => <div key={String(token.id)}><span><b>{String(token.name)}</b><small>{token.last_used_at ? `Zuletzt verwendet: ${dateText(token.last_used_at)}` : `Erstellt: ${dateText(token.created_at)}`}</small></span><Button size="icon-sm" variant="destructive" aria-label={`${String(token.name)} widerrufen`} onClick={() => void act({ action: 'revoke-device-token', id: token.id })}><Trash2 /></Button></div>)}</div>
+        </section>
+        <section className="admin-card email-settings-card calendar-import-card">
+          <div className="email-settings-title">
+            <h3><CalendarDays /> Google-Kalender</h3>
+            <Badge variant="outline">{data.calendarFeeds.length} verbunden</Badge>
+          </div>
+          <p>Hinterlege die private iCal-Adresse aus Google Kalender. Wiederholte Importe aktualisieren vorhandene Termine und erzeugen keine Duplikate.</p>
+          <form onSubmit={submit('create-calendar-feed', (form) => ({
+            name: field(form, 'name'), icalUrl: field(form, 'icalUrl'),
+            memberId: field(form, 'memberId'), isShared: form.get('isShared') === 'on',
+          }))}>
+            <div className="form-row">
+              <label className="field-label"><span>Kalendername</span><Input name="name" placeholder="z. B. Familie oder Arbeit" required /></label>
+              <label className="field-label"><span>Zuordnung</span><MemberSelect members={data.members} name="memberId" /></label>
+            </div>
+            <label className="field-label"><span>Private iCal-Adresse von Google</span><Input name="icalUrl" type="url" placeholder="https://calendar.google.com/calendar/ical/…/basic.ics" required /></label>
+            <label className="checkline"><input name="isShared" type="checkbox" /> Termine gelten für die ganze Familie</label>
+            <Button type="submit"><Plus /> Kalender verbinden und importieren</Button>
+          </form>
+          <div className="device-token-list">
+            {data.calendarFeeds.map((feed) => <div key={String(feed.id)}>
+              <span><b>{String(feed.name)}</b><small>{feed.last_sync_status ? String(feed.last_sync_status) : 'Noch nicht synchronisiert'}{feed.last_sync_at ? ` · ${dateText(feed.last_sync_at)}` : ''}</small></span>
+              <Button size="icon-sm" variant="destructive" aria-label={`${String(feed.name)} entfernen`} onClick={() => { if (window.confirm(`Google-Kalender „${String(feed.name)}“ und alle daraus importierten Termine entfernen?`)) void act({ action: 'delete-calendar-feed', id: feed.id }); }}><Trash2 /></Button>
+            </div>)}
+          </div>
+          {data.calendarFeeds.length > 0 && <Button variant="outline" onClick={() => void act({ action: 'sync-calendar-feeds' })}><RefreshCw /> Alle Kalender jetzt synchronisieren</Button>}
         </section>
       </div>
       {editing && (

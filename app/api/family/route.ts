@@ -1,5 +1,6 @@
 import { env } from 'cloudflare:workers';
 import { extendedCatalog } from '@/lib/product-catalog';
+import { parseGoogleCalendar, validateGoogleCalendarUrl } from '@/lib/google-calendar';
 
 type Session = { familyId: string; memberId: string; role: string; name: string };
 type RuntimeEnv = typeof env & { RESEND_API_KEY?: string; DOCKER_TRUST_PROXY?: string };
@@ -102,10 +103,30 @@ async function processEmailReminders(s: Session) {
   }
 }
 
+async function syncCalendarFeed(s: Session, feedId: string) {
+  const feed = await env.DB.prepare('SELECT * FROM calendar_feeds WHERE id = ? AND family_id = ? AND enabled = 1').bind(feedId, s.familyId).first<Record<string, unknown>>();
+  if (!feed) throw new Error('Kalender nicht gefunden oder deaktiviert.');
+  const response = await fetch(validateGoogleCalendarUrl(String(feed.ical_url)), { headers: { accept: 'text/calendar' } });
+  if (!response.ok) throw new Error(`Google-Kalender konnte nicht geladen werden (${response.status}).`);
+  const source = await response.text();
+  if (source.length > 5_000_000) throw new Error('Der Google-Kalender ist zu groß für den Import.');
+  const events = parseGoogleCalendar(source);
+  for (let offset = 0; offset < events.length; offset += 50) {
+    await env.DB.batch(events.slice(offset, offset + 50).map((event) => env.DB.prepare(`INSERT INTO events
+      (id, family_id, title, starts_at, ends_at, member_id, is_shared, all_day, calendar_feed_id, external_uid)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(calendar_feed_id, external_uid) DO UPDATE SET title=excluded.title, starts_at=excluded.starts_at, ends_at=excluded.ends_at, member_id=excluded.member_id, is_shared=excluded.is_shared, all_day=excluded.all_day`)
+      .bind(id('event'), s.familyId, event.title, event.startsAt, event.endsAt, feed.member_id || null, feed.is_shared ? 1 : 0, event.allDay ? 1 : 0, feed.id, event.uid)));
+  }
+  const now = Math.floor(Date.now() / 1000);
+  await env.DB.prepare('UPDATE calendar_feeds SET last_sync_at = ?, last_sync_status = ? WHERE id = ? AND family_id = ?').bind(now, `${events.length} Termine synchronisiert`, feedId, s.familyId).run();
+  return events.length;
+}
+
 async function loadAll(s: Session) {
   const db = env.DB;
   await ensureCatalog();
-  const [members, recipes, shopping, projects, todos, events, chores, catalog, emailSettings, deviceTokens] = await Promise.all([
+  const [members, recipes, shopping, projects, todos, events, chores, catalog, emailSettings, deviceTokens, calendarFeeds] = await Promise.all([
     db.prepare('SELECT * FROM members WHERE family_id = ? ORDER BY name').bind(s.familyId).all(),
     db.prepare('SELECT * FROM recipes WHERE family_id = ? ORDER BY title').bind(s.familyId).all(),
     db.prepare('SELECT * FROM shopping_items WHERE family_id = ? ORDER BY checked, rowid DESC').bind(s.familyId).all(),
@@ -116,8 +137,9 @@ async function loadAll(s: Session) {
     db.prepare('SELECT * FROM product_catalog ORDER BY category, name').all(),
     db.prepare('SELECT * FROM email_settings WHERE family_id = ?').bind(s.familyId).first(),
     db.prepare('SELECT id, member_id, name, created_at, last_used_at FROM device_tokens WHERE family_id = ? AND revoked_at IS NULL ORDER BY created_at DESC').bind(s.familyId).all(),
+    db.prepare('SELECT id, name, member_id, is_shared, enabled, last_sync_at, last_sync_status FROM calendar_feeds WHERE family_id = ? ORDER BY name').bind(s.familyId).all(),
   ]);
-  return { session: s, members: members.results, recipes: recipes.results, shopping: shopping.results, projects: projects.results, todos: todos.results, events: events.results, chores: chores.results, catalog: catalog.results, emailSettings: emailSettings ?? null, deviceTokens: deviceTokens.results, mailConfigured: Boolean((env as RuntimeEnv).RESEND_API_KEY) };
+  return { session: s, members: members.results, recipes: recipes.results, shopping: shopping.results, projects: projects.results, todos: todos.results, events: events.results, chores: chores.results, catalog: catalog.results, emailSettings: emailSettings ?? null, deviceTokens: deviceTokens.results, calendarFeeds: calendarFeeds.results, mailConfigured: Boolean((env as RuntimeEnv).RESEND_API_KEY) };
 }
 
 export async function GET(request: Request) {
@@ -144,6 +166,29 @@ export async function POST(request: Request) {
     else if (action === 'toggle-todo') await db.prepare('UPDATE todos SET completed = NOT completed WHERE id = ? AND project_id IN (SELECT id FROM projects WHERE family_id = ?)').bind(text('id'), s.familyId).run();
     else if (action === 'clear-completed-todos') await db.prepare('DELETE FROM todos WHERE completed = true AND project_id IN (SELECT id FROM projects WHERE family_id = ?)').bind(s.familyId).run();
     else if (action === 'create-event') await db.prepare('INSERT INTO events (id, family_id, title, starts_at, ends_at, member_id, is_shared, all_day) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').bind(id('event'), s.familyId, text('title'), Number(body.startsAt), Number(body.endsAt) || null, text('memberId') || null, body.isShared ? 1 : 0, body.allDay ? 1 : 0).run();
+    else if (action === 'create-calendar-feed') {
+      if (s.role !== 'admin') return json({ error: 'Nur Administratoren dürfen Kalenderquellen hinzufügen.' }, 403);
+      const url = validateGoogleCalendarUrl(text('icalUrl'));
+      if (await db.prepare('SELECT 1 FROM calendar_feeds WHERE family_id = ? AND ical_url = ?').bind(s.familyId, url).first()) return json({ error: 'Dieser Google-Kalender ist bereits verbunden.' }, 400);
+      const memberId = text('memberId') || null;
+      if (memberId && !await db.prepare('SELECT 1 FROM members WHERE id = ? AND family_id = ?').bind(memberId, s.familyId).first()) return json({ error: 'Familienmitglied nicht gefunden.' }, 404);
+      const feedId = id('calendar');
+      await db.prepare('INSERT INTO calendar_feeds (id, family_id, name, ical_url, member_id, is_shared, enabled) VALUES (?, ?, ?, ?, ?, ?, 1)').bind(feedId, s.familyId, text('name'), url, memberId, body.isShared ? 1 : 0).run();
+      await syncCalendarFeed(s, feedId);
+    }
+    else if (action === 'sync-calendar-feeds') {
+      if (s.role !== 'admin') return json({ error: 'Nur Administratoren dürfen Kalender synchronisieren.' }, 403);
+      const feeds = await db.prepare('SELECT id FROM calendar_feeds WHERE family_id = ? AND enabled = 1').bind(s.familyId).all<{ id: string }>();
+      for (const feed of feeds.results) await syncCalendarFeed(s, feed.id);
+    }
+    else if (action === 'delete-calendar-feed') {
+      if (s.role !== 'admin') return json({ error: 'Nur Administratoren dürfen Kalenderquellen löschen.' }, 403);
+      const feedId = text('id');
+      await db.batch([
+        db.prepare('DELETE FROM events WHERE calendar_feed_id = ? AND family_id = ?').bind(feedId, s.familyId),
+        db.prepare('DELETE FROM calendar_feeds WHERE id = ? AND family_id = ?').bind(feedId, s.familyId),
+      ]);
+    }
     else if (action === 'create-chore') {
       const frequency = ['weekly', 'biweekly', 'monthly'].includes(text('repeatRule')) ? text('repeatRule') as ChoreRule['frequency'] : null;
       const weekdays = Array.isArray(body.weekdays) ? body.weekdays.map(Number).filter((day) => day >= 1 && day <= 7) : [];
@@ -200,6 +245,7 @@ export async function POST(request: Request) {
       await db.batch([
         db.prepare('UPDATE todos SET assigned_member_id = NULL WHERE assigned_member_id = ?').bind(target.id),
         db.prepare('UPDATE events SET member_id = NULL WHERE member_id = ? AND family_id = ?').bind(target.id, s.familyId),
+        db.prepare('UPDATE calendar_feeds SET member_id = NULL WHERE member_id = ? AND family_id = ?').bind(target.id, s.familyId),
         db.prepare('UPDATE chores SET assigned_member_id = NULL WHERE assigned_member_id = ? AND family_id = ?').bind(target.id, s.familyId),
         db.prepare('DELETE FROM members WHERE id = ? AND family_id = ?').bind(target.id, s.familyId),
       ]);
